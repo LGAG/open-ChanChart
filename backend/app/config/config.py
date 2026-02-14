@@ -19,6 +19,7 @@ REDIS_URL = _redis_cfg.get("url", "redis://localhost:6379/0")
 REDIS_HOST = _redis_cfg.get("host", "localhost")
 REDIS_PORT = _redis_cfg.get("port", 6379)
 REDIS_PASSWORD = _redis_cfg.get("password", None)
+REDIS_EXPIRE = _redis_cfg.get("expire", 60 * 60 * 24 * 2)
 
 _mysql_cfg = _cfg.get("mysql", {}) if isinstance(_cfg, dict) else {}
 MYSQL_URL = _mysql_cfg.get("url", "mysql://root:password@localhost:3306/test")
