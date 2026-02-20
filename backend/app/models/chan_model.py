@@ -1,6 +1,12 @@
 from pydantic import BaseModel, Field
 from typing import List
 
+class ClassicChanKline(BaseModel):
+    index: int = Field(..., description="K线索引")
+    start: str = Field(..., description="开始时间")
+    end: str = Field(..., description="结束时间")
+    high: float = Field(..., description="最高价")
+    low: float = Field(..., description="最低价")
 
 class Fractal(BaseModel):
     """分型数据模型"""

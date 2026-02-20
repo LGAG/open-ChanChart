@@ -1,10 +1,10 @@
 """缠论核心算法实现"""
 from typing import List
 from app.models.stock_model import KlineData
-from app.models.chan_model import Fractal, Pen, Segment, ZhongShu
+from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu
 
 
-def is_kline_contained(k1: KlineData, k2: KlineData) -> bool:
+def is_kline_contained(k1: ClassicChanKline, k2: ClassicChanKline) -> bool:
     """
     判断两根K线是否存在包含关系
     包含关系：一根K线的高低点完全包含另一根K线，或被另一根K线包含
@@ -13,7 +13,7 @@ def is_kline_contained(k1: KlineData, k2: KlineData) -> bool:
            (k1.high >= k2.high and k1.low <= k2.low)
 
 
-def process_inclusion(klines: List[KlineData]) -> List[KlineData]:
+def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
     """
     处理K线包含关系
     在上升趋势中，取两根K线的最高价为新K线最高价，两根K线的较高的最低价为新K线最低价
@@ -22,11 +22,25 @@ def process_inclusion(klines: List[KlineData]) -> List[KlineData]:
     if len(klines) < 2:
         return klines
     
-    processed = [klines[0]]
+    first = ClassicChanKline(
+        index=0,
+        start=klines[0].date,
+        end=klines[0].date,
+        high=klines[0].high,
+        low=klines[0].low
+    )
+    processed = [first]
     direction = None  # 'up' or 'down'
+    count = 0
     
     for i in range(1, len(klines)):
-        current = klines[i]
+        current = ClassicChanKline(
+            index=i,
+            start=klines[i].date,
+            end=klines[i].date,
+            high=klines[i].high,
+            low=klines[i].low
+        )
         prev = processed[-1]
         
         # 判断是否存在包含关系
@@ -36,38 +50,44 @@ def process_inclusion(klines: List[KlineData]) -> List[KlineData]:
                 direction = 'up'
             elif current.high < prev.high:
                 direction = 'down'
-            processed.append(current)
+            count += 1
+            processed.append(ClassicChanKline(
+                index=count,
+                start=current.start,
+                end=current.end,
+                high=current.high,
+                low=current.low
+            ))
         else:
+            count += 1
             # 有包含关系，根据方向处理
             if direction == 'up':
-                # 上升趋势：取高高低高
-                new_kline = KlineData(
-                    date=current.date,
-                    open=current.open,
+                # 上升趋势：取高中高，低中高
+                new_kline = ClassicChanKline(
+                    index=count,
+                    start=prev.start,
+                    end=current.end,
                     high=max(current.high, prev.high),
-                    low=max(current.low, prev.low),
-                    close=current.close,
-                    volume=current.volume + prev.volume
+                    low=max(current.low, prev.low)
                 )
             elif direction == 'down':
-                # 下降趋势：取低低高低
-                new_kline = KlineData(
-                    date=current.date,
-                    open=current.open,
+                # 下降趋势：取低中低，高中低
+                new_kline = ClassicChanKline(
+                    index=count,
+                    start=prev.start,
+                    end=current.end,
                     high=min(current.high, prev.high),
-                    low=min(current.low, prev.low),
-                    close=current.close,
-                    volume=current.volume + prev.volume
+                    low=min(current.low, prev.low)
                 )
             else:
                 # 方向未确定，默认合并
-                new_kline = KlineData(
-                    date=current.date,
-                    open=current.open,
-                    high=max(current.high, prev.high),
-                    low=min(current.low, prev.low),
-                    close=current.close,
-                    volume=current.volume + prev.volume
+                print(f"error: direction not determined: {direction}")
+                new_kline = ClassicChanKline(
+                    index=count,
+                    start=prev.start,
+                    end=current.end,
+                    high=current.high,
+                    low=current.low
                 )
             
             processed[-1] = new_kline
