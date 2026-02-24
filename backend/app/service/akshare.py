@@ -1,9 +1,10 @@
 import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
-from data_process import BaseProcessor
+from app.service.data_process import BaseProcessor
 from app.models.stock_model import KlineData
 from typing import List
+import datetime
 from app.utils.redis import get_cache, set_cache
 
 PERIOD_MAP = {
@@ -49,8 +50,14 @@ class AkshareProcessor(BaseProcessor):
         获取股票K线数据（基于Akshare，优先读缓存）
         """
         # 处理日期：转换为Akshare要求的8位格式（无横杠）
-        start = start_date.replace("-", "") if start_date else self.default_start_date
-        end = end_date.replace("-", "") if end_date else self.default_end_date
+        if start_date and end_date:
+            start = start_date.replace("-", "")
+            end = end_date.replace("-", "")
+        else:
+            print("未指定日期")
+            start = datetime.now().strftime("%Y%m%d")
+            end = (datetime.now() - timedelta(days=50)).strftime("%Y%m%d")
+
 
         cache_key = self._get_cache_key(code, market, period, start, end)
         cache_data = get_cache(cache_key)
@@ -124,7 +131,12 @@ class AkshareProcessor(BaseProcessor):
                     high=float(row['high']),
                     low=float(row['low']),
                     close=float(row['close']),
-                    volume=int(row['volume'])
+                    volume=int(row['volume']),
+                    code=str(code),
+                    amount=float(row['amount']) if 'amount' in row and pd.notna(row['amount']) else 0.0,
+                    amplitude=float(row['amplitude']) if 'amplitude' in row and pd.notna(row['amplitude']) else 0.0,
+                    change=float(row['change']) if 'change' in row and pd.notna(row['change']) else 0.0,
+                    turnover=float(row['turnover']) if 'turnover' in row and pd.notna(row['turnover']) else 0.0,
                 )
                 kline_list.append(kline.model_dump())
 

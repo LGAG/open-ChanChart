@@ -1,6 +1,7 @@
 import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
+from abc import ABC, abstractmethod
 from typing import List
 from dotenv import load_dotenv
 import os
@@ -12,9 +13,9 @@ from abc import ABC, abstractmethod
 load_dotenv()
 
 
-class BaseProcessor:
+class BaseProcessor(ABC):
     @abstractmethod
-    def get_bar_data(self, code: str, market: str, period: str, start_date: str = None, end_date: str = None) -> List[KlineData]:
+    def get_bar_data(self, code: str, market: str, period: str, start_date: str = None, end_date: str = None):
         pass
 
 class StockDataProcessor:
@@ -47,7 +48,7 @@ class StockDataProcessor:
 
             filtered = [
                 stock for stock in stock_list
-                if (keyword in stock['code']) or (keyword in stock['name'])
+                if ((keyword in stock['code']) or (keyword in stock['name']))
                 and (stock['market'] == market)
             ]
 

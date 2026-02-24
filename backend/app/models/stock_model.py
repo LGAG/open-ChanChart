@@ -5,16 +5,16 @@ from typing import Optional
 class KlineData(BaseModel):
     """K线数据模型"""
     date: str = Field(..., description="日期")
-    code: str = Field(..., description="股票代码")
+    code: Optional[str] = Field(None, description="股票代码")
     open: float = Field(..., description="开盘价")
     high: float = Field(..., description="最高价")
     low: float = Field(..., description="最低价")
     close: float = Field(..., description="收盘价")
     volume: float = Field(..., description="成交量")
-    amount: float = Field(..., description="成交额")
-    amplitude: float = Field(..., description="振幅")
-    change: float = Field(..., description="涨跌幅")
-    turnover: float = Field(..., description="换手率")
+    amount: Optional[float] = Field(None, description="成交额")
+    amplitude: Optional[float] = Field(None, description="振幅")
+    change: Optional[float] = Field(None, description="涨跌幅")
+    turnover: Optional[float] = Field(None, description="换手率")
 
 
 class StockInfo(BaseModel):
