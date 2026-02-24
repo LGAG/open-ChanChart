@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, dev, copilot/* ]
   pull_request:
-    branches: [ main, develop ]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,8 +35,12 @@ jobs:
         
     - name: Start backend server (smoke test)
       working-directory: ./backend
+      # Run the server in the background and kill it after 10 seconds
+      # The --preserve-status flag ensures that the exit code of the server process is preserved,
+      # and if the timeout is reached, it will not return a non-zero exit code, 
+      # which would cause the step to fail.
       run: |
-        timeout 10 python run.py || true
+        timeout --preserve-status 10s python run.py
         
   frontend:
     name: Frontend Tests
