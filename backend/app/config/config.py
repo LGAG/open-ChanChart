@@ -2,7 +2,7 @@ import os
 import yaml
 
 def _load_yaml_config():
-    path = os.path.join(os.path.dirname(__file__), ".backend/app/config/config.yaml")
+    path = os.path.join(os.path.dirname(__file__), "./backend/app/config/config.yaml")
     if os.path.isfile(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
