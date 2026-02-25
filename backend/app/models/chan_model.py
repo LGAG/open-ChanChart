@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List
 
 class ClassicChanKline(BaseModel):
+    """缠论k线数据模型"""
     index: int = Field(..., description="K线索引")
     start: str = Field(..., description="开始时间")
     end: str = Field(..., description="结束时间")
@@ -11,8 +12,6 @@ class ClassicChanKline(BaseModel):
 class Fractal(BaseModel):
     """分型数据模型"""
     index: int = Field(..., description="K线索引")
-    date: str = Field(..., description="日期")
-    price: float = Field(..., description="价格")
     type: str = Field(..., description="分型类型 top/bottom")
 
 

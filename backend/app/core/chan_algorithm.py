@@ -95,7 +95,7 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
     return processed
 
 
-def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
+def identify_fractals(klines: List[ClassicChanKline]) -> List[Fractal]:
     """
     识别顶底分型
     顶分型：第二根K线的高点是三根中最高的，且第二根K线的低点也是三根中最高的
@@ -112,9 +112,7 @@ def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
         if (curr_k.high > prev_k.high and curr_k.high > next_k.high and
             curr_k.low > prev_k.low and curr_k.low > next_k.low):
             fractals.append(Fractal(
-                index=i,
-                date=curr_k.date,
-                price=curr_k.high,
+                index=curr_k.index,
                 type="top"
             ))
         
@@ -122,9 +120,7 @@ def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
         elif (curr_k.low < prev_k.low and curr_k.low < next_k.low and
               curr_k.high < prev_k.high and curr_k.high < next_k.high):
             fractals.append(Fractal(
-                index=i,
-                date=curr_k.date,
-                price=curr_k.low,
+                index=curr_k.index,
                 type="bottom"
             ))
     
@@ -264,6 +260,10 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True) -
     
     # 2. 识别分型
     fractals = identify_fractals(processed_klines)
+    
+    return{
+        "fractals": fractals
+    }
     
     # 3. 生成笔
     pens = generate_pens(fractals, processed_klines)
