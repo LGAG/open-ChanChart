@@ -1,7 +1,7 @@
 <template>
   <div class="home">
     <el-card class="control-panel">
-      <h2>缠论股票图表可视化系统</h2>
+      <h2>可视化系统</h2>
       
       <div class="controls">
         <div class="control-item">

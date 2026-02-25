@@ -48,7 +48,7 @@ async def get_chan_analysis(
             "code": code,
             "market": market,
             "period": period,
-            "klines": klines_data,
+            "klines": [f.model_dump() for f in chan_result["chan_klines"]],
             "chan": {
                 "fractals": [f.model_dump() for f in chan_result["fractals"]],
                 "pens": [p.model_dump() for p in chan_result["pens"]],

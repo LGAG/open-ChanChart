@@ -296,6 +296,7 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True, l
     pens = generate_pens(fractals, processed_klines)
     
     return{
+        "chan_klines": processed_klines,
         "fractals": fractals,
         "pens": pens
     }
