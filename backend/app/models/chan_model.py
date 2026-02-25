@@ -21,8 +21,6 @@ class Pen(BaseModel):
     end_index: int = Field(..., description="结束K线索引")
     start_date: str = Field(..., description="起始日期")
     end_date: str = Field(..., description="结束日期")
-    start_price: float = Field(..., description="起始价格")
-    end_price: float = Field(..., description="结束价格")
     direction: str = Field(..., description="方向 up/down")
 
 
