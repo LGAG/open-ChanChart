@@ -27,6 +27,9 @@ def test_search_with_market_filter_returns_only_that_market(client):
     response = client.get("/api/stock/search", params={"keyword": "银行", "market": "sh"})
     assert response.status_code == 200
     body = response.json()
+    assert body["code"] == 200
+    assert isinstance(body["data"], list)
+    assert len(body["data"]) > 0
     for stock in body["data"]:
         assert stock["market"] == "sh"
 

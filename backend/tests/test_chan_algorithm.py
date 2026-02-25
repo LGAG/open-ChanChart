@@ -57,7 +57,7 @@ class TestIsKlineContained:
     def test_no_containment_downward(self):
         k1 = make_kline("2024-01-01", high=110, low=100)
         k2 = make_kline("2024-01-02", high=105, low=95)
-        # k1.high >= k2.high but k1.low > k2.low, and k1.high > k2.high but k1.low > k2.low → not contained
+        # k1 and k2 do not overlap, so neither contains the other
         assert is_kline_contained(k1, k2) is False
 
 
@@ -105,6 +105,19 @@ class TestProcessInclusion:
         merged = result[-1]
         assert merged.high == 110
         assert merged.low == 96
+
+    def test_downtrend_inclusion_takes_lower_values(self):
+        # Establish downtrend first, then merge a contained bar
+        klines = [
+            make_kline("2024-01-01", high=110, low=100),
+            make_kline("2024-01-02", high=105, low=95),   # downtrend
+            make_kline("2024-01-03", high=104, low=96),   # contained in k2
+        ]
+        result = process_inclusion(klines)
+        assert len(result) == 2
+        merged = result[-1]
+        assert merged.high == 104   # min(105, 104)
+        assert merged.low == 95     # min(95, 96)
 
 
 # ---------------------------------------------------------------------------
@@ -280,16 +293,15 @@ class TestIdentifyZhongshus:
         assert len(zhongshus) == 1
         assert zhongshus[0].high > zhongshus[0].low
 
-    def test_non_overlapping_pens_produce_no_zhongshu(self):
-        # pen3 is completely above pen1
+    def test_overlapping_pens_with_wide_range(self):
+        # pen3 has a very wide range but still overlaps with pen1 and pen2
         pens = [
             self._make_pen(80, 90, "up"),
             self._make_pen(90, 85, "down"),
             self._make_pen(85, 200, "up"),
         ]
         zhongshus = identify_zhongshus(pens)
-        # overlap_high = min(90, 90, 200) = 90, overlap_low = max(80, 85, 85) = 85 → 90 > 85, zhongshu exists
-        # Actually this does have an overlap; let's just assert structure is correct
+        # overlap_high = min(90, 90, 200) = 90, overlap_low = max(80, 85, 85) = 85 → zhongshu exists
         for z in zhongshus:
             assert z.high > z.low
 
