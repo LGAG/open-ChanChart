@@ -32,23 +32,35 @@ const initChart = () => {
 const updateChart = () => {
   if (!chartInstance || !props.klineData.length) return
 
-  // Prepare K-line data
-  const dates = props.klineData.map(item => item.date)
+  // Build a map from kline index to kline for quick lookup
+  const klineMap = {}
+  props.klineData.forEach(kline => {
+    klineMap[kline.index] = kline
+  })
+
+  // Prepare K-line data from ClassicChanKline (start date, high/low only)
+  const dates = props.klineData.map(item => item.start)
+  // Render as candlestick using high/low (open=low, close=high to show full range bar)
   const ohlc = props.klineData.map(item => [
-    item.open,
-    item.close,
+    item.low,
+    item.high,
     item.low,
     item.high
   ])
-  const volumes = props.klineData.map(item => item.volume)
 
   // Prepare Chan theory data - pen lines as segments
   const penLineData = []
   if (props.chanData.pens) {
     props.chanData.pens.forEach(pen => {
-      penLineData.push([pen.start_date, pen.start_price])
-      penLineData.push([pen.end_date, pen.end_price])
-      penLineData.push([null, null]) // Break line between pens
+      const startKline = klineMap[pen.start_index]
+      const endKline = klineMap[pen.end_index]
+      if (startKline && endKline) {
+        const startPrice = pen.direction === 'down' ? startKline.high : startKline.low
+        const endPrice = pen.direction === 'down' ? endKline.low : endKline.high
+        penLineData.push([pen.start_date, startPrice])
+        penLineData.push([pen.end_date, endPrice])
+        penLineData.push([null, null]) // Break line between pens
+      }
     })
   }
 
@@ -57,53 +69,13 @@ const updateChart = () => {
   const bottomFractals = []
   if (props.chanData.fractals) {
     props.chanData.fractals.forEach(fractal => {
-      if (fractal.type === 'top') {
-        topFractals.push([fractal.date, fractal.price])
-      } else {
-        bottomFractals.push([fractal.date, fractal.price])
-      }
-    })
-  }
-
-  // Prepare zhongshu rectangles
-  const zhongshuSeries = []
-  if (props.chanData.zhongshus) {
-    props.chanData.zhongshus.forEach((zs, index) => {
-      const startKline = props.klineData[zs.start_index]
-      const endKline = props.klineData[zs.end_index]
-      if (startKline && endKline) {
-        zhongshuSeries.push({
-          type: 'line',
-          name: `中枢${index + 1}上沿`,
-          data: dates.map((date, idx) => {
-            if (idx >= zs.start_index && idx <= zs.end_index) {
-              return zs.high
-            }
-            return null
-          }),
-          lineStyle: {
-            color: 'rgba(255, 0, 0, 0.3)',
-            width: 2,
-            type: 'dashed'
-          },
-          symbol: 'none'
-        })
-        zhongshuSeries.push({
-          type: 'line',
-          name: `中枢${index + 1}下沿`,
-          data: dates.map((date, idx) => {
-            if (idx >= zs.start_index && idx <= zs.end_index) {
-              return zs.low
-            }
-            return null
-          }),
-          lineStyle: {
-            color: 'rgba(0, 255, 0, 0.3)',
-            width: 2,
-            type: 'dashed'
-          },
-          symbol: 'none'
-        })
+      const kline = klineMap[fractal.index]
+      if (kline) {
+        if (fractal.type === 'top') {
+          topFractals.push([kline.start, kline.high])
+        } else {
+          bottomFractals.push([kline.start, kline.low])
+        }
       }
     })
   }
@@ -128,13 +100,7 @@ const updateChart = () => {
         left: '10%',
         right: '10%',
         top: '15%',
-        height: '60%'
-      },
-      {
-        left: '10%',
-        right: '10%',
-        top: '78%',
-        height: '15%'
+        bottom: '15%'
       }
     ],
     xAxis: [
@@ -147,19 +113,6 @@ const updateChart = () => {
         splitLine: { show: false },
         min: 'dataMin',
         max: 'dataMax'
-      },
-      {
-        type: 'category',
-        gridIndex: 1,
-        data: dates,
-        scale: true,
-        boundaryGap: false,
-        axisLine: { onZero: false },
-        axisTick: { show: false },
-        splitLine: { show: false },
-        axisLabel: { show: false },
-        min: 'dataMin',
-        max: 'dataMax'
       }
     ],
     yAxis: [
@@ -168,29 +121,20 @@ const updateChart = () => {
         splitArea: {
           show: true
         }
-      },
-      {
-        scale: true,
-        gridIndex: 1,
-        splitNumber: 2,
-        axisLabel: { show: false },
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { show: false }
       }
     ],
     dataZoom: [
       {
         type: 'inside',
-        xAxisIndex: [0, 1],
+        xAxisIndex: [0],
         start: 0,
         end: 100
       },
       {
         show: true,
-        xAxisIndex: [0, 1],
+        xAxisIndex: [0],
         type: 'slider',
-        top: '93%',
+        bottom: '3%',
         start: 0,
         end: 100
       }
@@ -206,22 +150,7 @@ const updateChart = () => {
           borderColor: '#ef232a',
           borderColor0: '#14b143'
         }
-      },
-      {
-        name: '成交量',
-        type: 'bar',
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        data: volumes,
-        itemStyle: {
-          color: function(params) {
-            const index = params.dataIndex
-            if (index === 0) return '#14b143'
-            return ohlc[index][1] >= ohlc[index][0] ? '#ef232a' : '#14b143'
-          }
-        }
-      },
-      ...zhongshuSeries
+      }
     ]
   }
 
