@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import List
 
+DAY = "day"
+
 class ClassicChanKline(BaseModel):
     """缠论k线数据模型"""
     index: int = Field(..., description="K线索引")
@@ -25,7 +27,7 @@ class Pen(BaseModel):
 
 
 class Segment(BaseModel):
-    """段数据模型"""
+    """线段数据模型"""
     start_index: int = Field(..., description="起始笔索引")
     end_index: int = Field(..., description="结束笔索引")
     pens: List[Pen] = Field(..., description="包含的笔列表")

@@ -1,7 +1,7 @@
 """缠论核心算法实现"""
 from typing import List
 from app.models.stock_model import KlineData
-from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu
+from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu, DAY
 
 
 def is_kline_contained(k1: ClassicChanKline, k2: ClassicChanKline) -> bool:
@@ -59,7 +59,6 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
                 low=current.low
             ))
         else:
-            count += 1
             # 有包含关系，根据方向处理
             if direction == 'up':
                 # 上升趋势：取高中高，低中高
@@ -161,6 +160,7 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
     while right < len(fractals):
         start_fractal = fractals[left]
         end_fractal = fractals[right]
+        print(f"start_fractal: {start_fractal}, end_fractal: {end_fractal}")
         
         # 检查是否符合笔的条件：类型交替且间隔足够
         if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 4:
@@ -225,7 +225,7 @@ def generate_segments(pens: List[Pen]) -> List[Segment]:
     return segments
 
 
-def identify_zhongshus(pens: List[Pen]) -> List[ZhongShu]:
+def identify_zhongshus(pens: List[Pen], level = DAY) -> List[ZhongShu]:
     """
     识别中枢
     简化实现：至少三笔重叠的区域构成中枢
@@ -262,7 +262,7 @@ def identify_zhongshus(pens: List[Pen]) -> List[ZhongShu]:
     return zhongshus
 
 
-def calculate_chan_data(klines: List[KlineData], process_include: bool = True) -> dict:
+def calculate_chan_data(klines: List[KlineData], process_include: bool = True, level = DAY) -> dict:
     """
     计算缠论数据
     
@@ -286,22 +286,25 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True) -
         processed_klines = process_inclusion(klines)
     else:
         processed_klines = klines
-    
+    print(f"processed_klines: \n")
+    for kline in processed_klines:
+        print(kline)
     # 2. 识别分型
     fractals = identify_fractals(processed_klines)
     
-    return{
-        "fractals": fractals
-    }
-    
     # 3. 生成笔
     pens = generate_pens(fractals, processed_klines)
+    
+    return{
+        "fractals": fractals,
+        "pens": pens
+    }
     
     # 4. 生成段
     segments = generate_segments(pens)
     
     # 5. 识别中枢
-    zhongshus = identify_zhongshus(pens)
+    zhongshus = identify_zhongshus(pens, level)
     
     return {
         "fractals": fractals,
