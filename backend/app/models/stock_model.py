@@ -4,6 +4,8 @@ from typing import Optional
 
 class KlineData(BaseModel):
     """K线数据模型"""
+    period: str = Field(..., description="周期")
+    level: int = Field(..., description="级别")
     date: str = Field(..., description="日期")
     code: str = Field(None, description="股票代码")
     open: float = Field(..., description="开盘价")

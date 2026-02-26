@@ -49,6 +49,10 @@ class AkshareProcessor(BaseProcessor):
         """
         获取股票K线数据（基于Akshare，优先读缓存）
         """
+        return self.get_bar_data_hist(code, market, period, start_date, end_date)
+
+    def get_bar_data_hist(self, code, market, period, start_date = None, end_date = None) -> List[KlineData]:
+       
         # 处理日期：转换为Akshare要求的8位格式（无横杠）
         if start_date and end_date:
             start = start_date.replace("-", "")
