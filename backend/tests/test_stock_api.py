@@ -1,5 +1,4 @@
 """Integration tests for the /api/stock endpoints."""
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +87,7 @@ def test_kline_with_date_range_respects_boundaries(client):
     response = client.get("/api/stock/kline", params=params)
     assert response.status_code == 200
     klines = response.json()["data"]["klines"]
+    assert len(klines) > 0
     for k in klines:
         assert k["date"] >= "2024-01-01"
         assert k["date"] <= "2024-01-31"

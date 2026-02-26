@@ -302,8 +302,7 @@ class TestIdentifyZhongshus:
         ]
         zhongshus = identify_zhongshus(pens)
         # overlap_high = min(90, 90, 200) = 90, overlap_low = max(80, 85, 85) = 85 → zhongshu exists
-        for z in zhongshus:
-            assert z.high > z.low
+        assert len(zhongshus) == 1
 
 
 # ---------------------------------------------------------------------------

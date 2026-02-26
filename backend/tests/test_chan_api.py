@@ -1,5 +1,4 @@
 """Integration tests for the /api/chan/analysis endpoint."""
-import pytest
 
 
 def test_chan_analysis_returns_success(client):
