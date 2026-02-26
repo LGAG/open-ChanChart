@@ -1,7 +1,7 @@
 import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
-from app.service.data_process import BaseProcessor
+from app.service.data_process import BaseProcessor, StockDataProcessor
 from app.models.stock_model import KlineData
 from typing import List
 import datetime
@@ -148,3 +148,5 @@ class AkshareProcessor(BaseProcessor):
         except Exception as e:
             print(f"获取K线数据失败：{e}")
             return []
+        
+stock_processor = StockDataProcessor(AkshareProcessor)

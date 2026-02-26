@@ -2,7 +2,9 @@
 from fastapi import APIRouter, Query
 from typing import Optional
 from datetime import datetime, timedelta
+import akshare as ak
 import random
+from app.service.akshare_service import stock_processor
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
 
@@ -46,52 +48,36 @@ async def search_stocks(
 async def get_kline_data(
     code: str = Query(..., description="股票代码"),
     market: str = Query(default="sh", description="市场类型"),
-    period: str = Query(default="D", description="周期 D/30F/5F"),
-    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
-    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD")
+    period: str = Query(default="daily", description="周期 D/30F/5F"),
+    start_date: Optional[str] = Query(default="20250101", description="开始日期 YYYYMMDD"),
+    end_date: Optional[str] = Query(default="20260226", description="结束日期 YYYYMMDD")
 ):
     """
     获取股票K线数据
     """
-    # 生成模拟数据
-    if end_date is None:
-        end = datetime.now()
-    else:
-        end = datetime.strptime(end_date, "%Y-%m-%d")
     
-    if start_date is None:
-        start = end - timedelta(days=90)  # 默认90天
-    else:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
+    df = ak.stock_zh_a_hist(symbol=code, period=period, start_date=start_date, end_date=end_date, adjust="qfq")
+    print(df.info())
     
-    # 生成模拟K线数据
-    klines = []
-    current_date = start
-    base_price = 100.0
-    
-    while current_date <= end:
-        # 跳过周末
-        if current_date.weekday() < 5:
-            # 生成随机价格波动
-            change = random.uniform(-0.05, 0.05)
-            base_price = base_price * (1 + change)
-            
-            open_price = base_price + random.uniform(-2, 2)
-            close_price = base_price + random.uniform(-2, 2)
-            high_price = max(open_price, close_price) + random.uniform(0, 3)
-            low_price = min(open_price, close_price) - random.uniform(0, 3)
-            volume = random.uniform(100000, 500000)
-            
-            klines.append({
-                "date": current_date.strftime("%Y-%m-%d"),
-                "open": round(open_price, 2),
-                "high": round(high_price, 2),
-                "low": round(low_price, 2),
-                "close": round(close_price, 2),
-                "volume": round(volume, 0)
-            })
-        
-        current_date += timedelta(days=1)
+    df_processed = df.copy()
+    df_processed['日期'] = df_processed['日期'].astype(str)
+    df_processed['date'] = df_processed['日期'].str.replace('-','')
+    df_processed['open'] = df_processed['开盘'].round(2)
+    df_processed['high'] = df_processed['最高'].round(2)
+    df_processed['low'] = df_processed['最低'].round(2)
+    df_processed['close'] = df_processed['收盘'].round(2)
+    df_processed['volume'] = df_processed['成交量'].round(0).astype(int)
+    df_processed['amount'] = df_processed['成交额'].round(2)
+    df_processed['amplitude'] = df_processed['振幅'].round(2)
+    df_processed['change_pct'] = df_processed['涨跌幅'].round(2)
+    df_processed['change'] = df_processed['涨跌额'].round(2)
+    df_processed['turnover'] = df_processed['换手率'].round(2)
+
+    # 只保留需要的列并转换
+    klines = df_processed[
+        ['date', 'open', 'high', 'low', 'close', 'volume', 'amount',
+        'amplitude', 'change_pct', 'change', 'turnover']
+    ].to_dict('records')
     
     return {
         "code": 200,

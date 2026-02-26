@@ -155,7 +155,8 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
             left += 1
             right += 1
             break
-    
+    if len(pens) == 0:
+        return []
     # 然后才是逐个处理后面的顶底分型
     while right < len(fractals):
         start_fractal = fractals[left]

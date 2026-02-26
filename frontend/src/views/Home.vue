@@ -12,7 +12,7 @@
         <div class="control-item">
           <label>选择周期：</label>
           <el-radio-group v-model="period" @change="loadData">
-            <el-radio-button label="D">日K</el-radio-button>
+            <el-radio-button label="daily">日K</el-radio-button>
             <el-radio-button label="30F" disabled>30分</el-radio-button>
             <el-radio-button label="5F" disabled>5分</el-radio-button>
           </el-radio-group>
@@ -73,7 +73,7 @@ import StockSelector from '../components/StockSelector.vue'
 import { getChanAnalysis } from '../api/chan'
 
 const currentStock = ref(null)
-const period = ref('D')
+const period = ref('daily')
 const processInclude = ref(true)
 const loading = ref(false)
 const klineData = ref([])
