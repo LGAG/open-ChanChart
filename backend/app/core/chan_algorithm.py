@@ -1,7 +1,7 @@
 """缠论核心算法实现"""
 from typing import List
 from app.models.stock_model import KlineData
-from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu
+from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu, DAY
 
 
 def is_kline_contained(k1: ClassicChanKline, k2: ClassicChanKline) -> bool:
@@ -59,7 +59,6 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
                 low=current.low
             ))
         else:
-            count += 1
             # 有包含关系，根据方向处理
             if direction == 'up':
                 # 上升趋势：取高中高，低中高
@@ -95,7 +94,7 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
     return processed
 
 
-def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
+def identify_fractals(klines: List[ClassicChanKline]) -> List[Fractal]:
     """
     识别顶底分型
     顶分型：第二根K线的高点是三根中最高的，且第二根K线的低点也是三根中最高的
@@ -112,9 +111,7 @@ def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
         if (curr_k.high > prev_k.high and curr_k.high > next_k.high and
             curr_k.low > prev_k.low and curr_k.low > next_k.low):
             fractals.append(Fractal(
-                index=i,
-                date=curr_k.date,
-                price=curr_k.high,
+                index=curr_k.index,
                 type="top"
             ))
         
@@ -122,16 +119,14 @@ def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
         elif (curr_k.low < prev_k.low and curr_k.low < next_k.low and
               curr_k.high < prev_k.high and curr_k.high < next_k.high):
             fractals.append(Fractal(
-                index=i,
-                date=curr_k.date,
-                price=curr_k.low,
+                index=curr_k.index,
                 type="bottom"
             ))
     
     return fractals
 
 
-def generate_pens(fractals: List[Fractal], klines: List[KlineData]) -> List[Pen]:
+def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
     """
     生成笔
     笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根K线
@@ -141,24 +136,55 @@ def generate_pens(fractals: List[Fractal], klines: List[KlineData]) -> List[Pen]
     
     pens = []
     
-    for i in range(len(fractals) - 1):
-        start_fractal = fractals[i]
-        end_fractal = fractals[i + 1]
+    left = 0
+    right = 1
+    
+    # 第一步：找到第一根笔
+    for i in range(1, len(fractals)):
+        # 实际上第一个条件永远成立，但是为了保险起见还是判断一下吧
+        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 4:
+            left = i - 1
+            right = i
+            pens.append(Pen(
+                start_index=fractals[left].index,
+                end_index=fractals[right].index,
+                start_date=klines[fractals[left].index].start,
+                end_date=klines[fractals[right].index].end,
+                direction="up" if fractals[left].type == "bottom" else "down"
+            ))
+            left += 1
+            right += 1
+            break
+    if len(pens) == 0:
+        return []
+    # 然后才是逐个处理后面的顶底分型
+    while right < len(fractals):
+        start_fractal = fractals[left]
+        end_fractal = fractals[right]
+        print(f"start_fractal: {start_fractal}, end_fractal: {end_fractal}")
         
         # 检查是否符合笔的条件：类型交替且间隔足够
-        if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 2:
+        if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 4:
             direction = "up" if start_fractal.type == "bottom" else "down"
-            
-            pens.append(Pen(
-                start_index=start_fractal.index,
-                end_index=end_fractal.index,
-                start_date=start_fractal.date,
-                end_date=end_fractal.date,
-                start_price=start_fractal.price,
-                end_price=end_fractal.price,
-                direction=direction
-            ))
+            if direction == pens[-1].direction:
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = klines[end_fractal.index].end
+            else:
+                # 除非有新的反向笔生成，否则一律对最近的一笔进行延申
+                pens.append(Pen(
+                    start_index=start_fractal.index,
+                    end_index=end_fractal.index,
+                    start_date=klines[start_fractal.index].start,
+                    end_date=klines[end_fractal.index].end,
+                    direction=direction
+                ))
+        else:
+            pens[-1].end_index = end_fractal.index
+            pens[-1].end_date = klines[end_fractal.index].end
+        left += 1
+        right += 1
     
+    # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
     return pens
 
 
@@ -200,7 +226,7 @@ def generate_segments(pens: List[Pen]) -> List[Segment]:
     return segments
 
 
-def identify_zhongshus(pens: List[Pen]) -> List[ZhongShu]:
+def identify_zhongshus(pens: List[Pen], level = DAY) -> List[ZhongShu]:
     """
     识别中枢
     简化实现：至少三笔重叠的区域构成中枢
@@ -237,7 +263,7 @@ def identify_zhongshus(pens: List[Pen]) -> List[ZhongShu]:
     return zhongshus
 
 
-def calculate_chan_data(klines: List[KlineData], process_include: bool = True) -> dict:
+def calculate_chan_data(klines: List[KlineData], process_include: bool = True, level = DAY) -> dict:
     """
     计算缠论数据
     
@@ -261,18 +287,26 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True) -
         processed_klines = process_inclusion(klines)
     else:
         processed_klines = klines
-    
+    print(f"processed_klines: \n")
+    for kline in processed_klines:
+        print(kline)
     # 2. 识别分型
     fractals = identify_fractals(processed_klines)
     
     # 3. 生成笔
     pens = generate_pens(fractals, processed_klines)
     
+    return{
+        "chan_klines": processed_klines,
+        "fractals": fractals,
+        "pens": pens
+    }
+    
     # 4. 生成段
     segments = generate_segments(pens)
     
     # 5. 识别中枢
-    zhongshus = identify_zhongshus(pens)
+    zhongshus = identify_zhongshus(pens, level)
     
     return {
         "fractals": fractals,

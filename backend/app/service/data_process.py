@@ -19,8 +19,8 @@ class BaseProcessor(ABC):
         pass
 
 class StockDataProcessor:
-    def __init__(self):
-        self.sourceProcessor = BaseProcessor()
+    def __init__(self, sourceProcessor):
+        self.sourceProcessor = sourceProcessor
 
     def get_kline_data(self, code: str, market: str, period: str, start_date: str = None, end_date: str = None) -> List[KlineData]:
         return self.sourceProcessor.get_bar_data(code, market, period, start_date, end_date)
@@ -57,5 +57,3 @@ class StockDataProcessor:
         except Exception as e:
             print(f"股票搜索失败：{e}")
             return []
-
-stock_processor = StockDataProcessor()

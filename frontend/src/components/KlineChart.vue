@@ -46,8 +46,10 @@ const updateChart = () => {
   const penLineData = []
   if (props.chanData.pens) {
     props.chanData.pens.forEach(pen => {
-      penLineData.push([pen.start_date, pen.start_price])
-      penLineData.push([pen.end_date, pen.end_price])
+      props.chanData.chan_klines[pen.start_index].start
+      
+      penLineData.push([props.chanData.chan_klines[pen.start_index].start, props.chanData.chan_klines[pen.start_index].low])
+      penLineData.push([props.chanData.chan_klines[pen.end_index].end, props.chanData.chan_klines[pen.end_index].high])
       penLineData.push([null, null]) // Break line between pens
     })
   }
