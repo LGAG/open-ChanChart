@@ -19,6 +19,20 @@
         </div>
 
         <div class="control-item">
+          <label>时间范围：</label>
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            @change="loadData"
+            style="width: 260px"
+          />
+        </div>
+
+        <div class="control-item">
           <label>包含关系处理：</label>
           <el-switch v-model="processInclude" @change="loadData" />
         </div>
@@ -72,12 +86,28 @@ import KlineChart from '../components/KlineChart.vue'
 import StockSelector from '../components/StockSelector.vue'
 import { getChanAnalysis } from '../api/chan'
 
+/**
+ * Calculate a date roughly N trading days ago.
+ * Uses 1.5× calendar days as approximation for Chinese market (Mon–Fri, excl. holidays).
+ */
+function tradingDaysAgo(n) {
+  const d = new Date()
+  d.setDate(d.getDate() - Math.ceil(n * 1.5))
+  return d.toISOString().slice(0, 10)
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10)
+}
+
 const currentStock = ref(null)
 const period = ref('daily')
 const processInclude = ref(true)
 const loading = ref(false)
 const klineData = ref([])
 const chanData = ref({})
+// Default: last 30 trading days
+const dateRange = ref([tradingDaysAgo(30), today()])
 
 const handleStockChange = (stock) => {
   currentStock.value = stock
@@ -92,11 +122,14 @@ const loadData = async () => {
 
   loading.value = true
   try {
+    const [startDate, endDate] = dateRange.value || [tradingDaysAgo(30), today()]
     const params = {
       code: currentStock.value.code,
       market: currentStock.value.market,
       period: period.value,
-      process_include: processInclude.value
+      process_include: processInclude.value,
+      start_date: startDate,
+      end_date: endDate
     }
 
     const response = await getChanAnalysis(params)

@@ -5,7 +5,7 @@ from typing import Optional
 class KlineData(BaseModel):
     """K线数据模型"""
     date: str = Field(..., description="日期")
-    code: str = Field(None, description="股票代码")
+    code: str = Field(..., description="股票代码")
     open: float = Field(..., description="开盘价")
     high: float = Field(..., description="最高价")
     low: float = Field(..., description="最低价")

@@ -4,7 +4,7 @@ from typing import Optional
 
 from app.models.stock_model import KlineData
 from app.core.chan_algorithm import calculate_chan_data
-from app.api.stock import get_kline_data
+from app.service.akshare_service import stock_processor
 
 router = APIRouter(prefix="/api/chan", tags=["chan"])
 
@@ -22,25 +22,23 @@ async def get_chan_analysis(
     获取缠论分析数据
     """
     # 1. 获取K线数据
-    kline_response = await get_kline_data(
+    klines_data = stock_processor.get_kline_data(
         code=code,
         market=market,
         period=period,
         start_date=start_date,
         end_date=end_date
     )
-    
-    if kline_response["code"] != 200:
+
+    if not klines_data:
         raise HTTPException(status_code=400, detail="Failed to fetch kline data")
-    
-    klines_data = kline_response["data"]["klines"]
-    
+
     # 2. 转换为KlineData对象
     klines = [KlineData(**kline) for kline in klines_data]
-    
+
     # 3. 计算缠论数据
     chan_result = calculate_chan_data(klines, process_include=process_include)
-    
+
     return {
         "code": 200,
         "message": "Success",

@@ -4,6 +4,7 @@ pydantic==2.10.5
 python-dotenv==1.0.0
 akshare
 tushare
+baostock
 pandas
 redis
 pymysql

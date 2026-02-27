@@ -8,7 +8,6 @@ import os
 import json
 from app.models.stock_model import KlineData
 from app.utils.redis import get_cache, set_cache
-from abc import ABC, abstractmethod
 
 load_dotenv()
 
@@ -19,11 +18,18 @@ class BaseProcessor(ABC):
         pass
 
 class StockDataProcessor:
-    def __init__(self, sourceProcessor):
-        self.sourceProcessor = sourceProcessor
+    def __init__(self, *sourceProcessors):
+        self.sourceProcessors = [P() if isinstance(P, type) else P for P in sourceProcessors]
 
     def get_kline_data(self, code: str, market: str, period: str, start_date: str = None, end_date: str = None) -> List[KlineData]:
-        return self.sourceProcessor.get_bar_data(code, market, period, start_date, end_date)
+        for processor in self.sourceProcessors:
+            try:
+                result = processor.get_bar_data(code, market, period, start_date, end_date)
+                if result:
+                    return result
+            except Exception as e:
+                print(f"Data source {type(processor).__name__} failed for {code}/{market}/{period}: {e}")
+        return []
         
 
     def search_stock(self, keyword: str, market: str):
