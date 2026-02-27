@@ -1,6 +1,9 @@
 import redis
 import pymysql
 from dbutils.pooled_db import PooledDB
+import pandas as pd
+from sqlalchemy import create_engine
+from sqlalchemy.pool import QueuePool
 from typing import Optional, Dict, Any
 from app.config.config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, MYSQL_DATABASE, MYSQL_HOST, MYSQL_PASSWORD, MYSQL_PORT, MYSQL_URL, MYSQL_USER
 
@@ -51,12 +54,25 @@ class MysqlClient(metaclass=SingletonMeta):
             autocommit=True
         )
 
+        self.engine = create_engine(
+            f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4",
+            poolclass=QueuePool,  # 匹配DBUtils连接池类型
+            pool_size=5,          # 与maxcached保持一致
+            max_overflow=15,      # 与maxconnections - maxcached保持一致
+            pool_pre_ping=True    # 每次获取连接前检查是否有效
+        )
+
     def get_connection(self):
         return self.pool.connection()
+    
+    def get_engine(self):
+        return self.engine
 
     def close(self):
         if self.pool:
             self.pool.close()
+
+Mysql_client = None
 
 def test_redis():
     redis1 = RedisClient()

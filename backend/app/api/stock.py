@@ -55,7 +55,7 @@ async def get_kline_data(
     """
     获取股票K线数据
     """
-    
+    print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
     df = ak.stock_zh_a_hist(symbol=code, period=period, start_date=start_date, end_date=end_date, adjust="qfq")
     print(df.info())
     
