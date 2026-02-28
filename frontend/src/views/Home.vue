@@ -19,6 +19,21 @@
         </div>
 
         <div class="control-item">
+          <label>时间范围：</label>
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            @change="loadData"
+            style="width: 260px"
+            default-time="00:00:00"
+          />
+        </div>
+
+        <div class="control-item">
           <label>包含关系处理：</label>
           <el-switch v-model="processInclude" @change="loadData" />
         </div>
@@ -65,21 +80,36 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import KlineChart from '../components/KlineChart.vue'
 import StockSelector from '../components/StockSelector.vue'
 import { getChanAnalysis } from '../api/chan'
 
-const currentStock = ref(null)
+interface Stock {
+  code: string
+  name: string
+  market: 'sh' | 'sz'
+}
+
+const currentStock = ref<Stock | null>(null)
 const period = ref('daily')
 const processInclude = ref(true)
 const loading = ref(false)
-const klineData = ref([])
-const chanData = ref({})
+const klineData = ref<any[]>([])
+const chanData = ref<{
+  fractals?: any[]
+  pens?: any[]
+  segments?: any[]
+  zhongshus?: any[]
+}>({})
+const dateRange = ref<[string, string]>([
+  new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().slice(0, 10),
+  new Date().toISOString().slice(0, 10)
+])
 
-const handleStockChange = (stock) => {
+const handleStockChange = (stock: Stock) => {
   currentStock.value = stock
   loadData()
 }
@@ -92,24 +122,28 @@ const loadData = async () => {
 
   loading.value = true
   try {
+    // 拼接请求参数（新增时间范围）
     const params = {
       code: currentStock.value.code,
       market: currentStock.value.market,
       period: period.value,
-      process_include: processInclude.value
+      process_include: processInclude.value,
+      start_date: dateRange.value[0],
+      end_date: dateRange.value[1]
     }
 
     const response = await getChanAnalysis(params)
     
-    if (response.code === 200) {
-      klineData.value = response.data.klines
-      chanData.value = response.data.chan
+    // 增强响应数据容错
+    if (response?.code === 200 && response?.data) {
+      klineData.value = response.data.klines || []
+      chanData.value = response.data.chan || {}
       ElMessage.success('数据加载成功')
     } else {
-      ElMessage.error('数据加载失败')
+      ElMessage.error('数据加载失败：接口返回异常')
     }
-  } catch (error) {
-    ElMessage.error('请求失败：' + error.message)
+  } catch (error: any) {
+    ElMessage.error(`请求失败：${error?.message || '未知错误'}`)
   } finally {
     loading.value = false
   }

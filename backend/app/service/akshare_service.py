@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from app.service.data_process import BaseProcessor, StockDataProcessor
 from app.models.stock_model import KlineData
 from typing import List
-import datetime
 from app.utils.redis import get_cache, set_cache
 
 PERIOD_MAP = {
@@ -59,8 +58,8 @@ class AkshareProcessor(BaseProcessor):
             end = end_date.replace("-", "")
         else:
             print("未指定日期")
-            start = datetime.now().strftime("%Y%m%d")
-            end = (datetime.now() - timedelta(days=50)).strftime("%Y%m%d")
+            end = datetime.now().strftime("%Y%m%d")
+            start = (datetime.now() - timedelta(days=50)).strftime("%Y%m%d")
 
 
         cache_key = self._get_cache_key(code, market, period, start, end)

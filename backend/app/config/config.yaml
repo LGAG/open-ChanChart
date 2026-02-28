@@ -5,8 +5,8 @@ redis:
   password: your_redis_pwd
   db: 0
 mysql:
-  host: 192.168.35.132
+  host: localhost
   port: 3306
   user: root
-  password: your_mysql_pwd
-  database: test_db
+  password: root
+  database: orm_test

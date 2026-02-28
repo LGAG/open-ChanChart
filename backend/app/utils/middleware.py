@@ -72,7 +72,7 @@ class MysqlClient(metaclass=SingletonMeta):
         if self.pool:
             self.pool.close()
 
-Mysql_client = None
+Mysql_client = MysqlClient()
 
 def test_redis():
     redis1 = RedisClient()

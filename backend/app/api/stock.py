@@ -57,12 +57,12 @@ async def get_kline_data(
     获取股票K线数据
     """
     print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
-    df = get_stock_data_daily_bao(symbol=code, market=market, period=period, start_date=start_date, end_date=end_date, adjust="qfq")
+    df = get_stock_data_daily_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
     print(df.info())
 
     # 只保留需要的列并转换
     klines = df[
-        ['date', 'open', 'high', 'low', 'close', 'volume']
+        ['date', 'open', 'high', 'low', 'close', 'volume', 'period', 'level', 'code']
     ].to_dict('records')
     
     return {
