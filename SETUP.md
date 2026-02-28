@@ -10,6 +10,18 @@ This is a working prototype of the ChanChart system - a stock market visualizati
 
 ## Installation
 
+### Middlewire Setup
+
+1. Navigate to the backend directory:
+```bash
+cd backend
+```
+
+2. start docker container
+```bash
+docker-compose up -d
+```
+
 ### Backend Setup
 
 1. Navigate to the backend directory:
