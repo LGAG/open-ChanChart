@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import akshare as ak
 import random
 from app.service.akshare_service import stock_processor
+from app.service.stock import get_stock_data_daily_bao
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
 
@@ -56,27 +57,12 @@ async def get_kline_data(
     获取股票K线数据
     """
     print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
-    df = ak.stock_zh_a_hist(symbol=code, period=period, start_date=start_date, end_date=end_date, adjust="qfq")
+    df = get_stock_data_daily_bao(symbol=code, market=market, period=period, start_date=start_date, end_date=end_date, adjust="qfq")
     print(df.info())
-    
-    df_processed = df.copy()
-    df_processed['日期'] = df_processed['日期'].astype(str)
-    df_processed['date'] = df_processed['日期'].str.replace('-','')
-    df_processed['open'] = df_processed['开盘'].round(2)
-    df_processed['high'] = df_processed['最高'].round(2)
-    df_processed['low'] = df_processed['最低'].round(2)
-    df_processed['close'] = df_processed['收盘'].round(2)
-    df_processed['volume'] = df_processed['成交量'].round(0).astype(int)
-    df_processed['amount'] = df_processed['成交额'].round(2)
-    df_processed['amplitude'] = df_processed['振幅'].round(2)
-    df_processed['change_pct'] = df_processed['涨跌幅'].round(2)
-    df_processed['change'] = df_processed['涨跌额'].round(2)
-    df_processed['turnover'] = df_processed['换手率'].round(2)
 
     # 只保留需要的列并转换
-    klines = df_processed[
-        ['date', 'open', 'high', 'low', 'close', 'volume', 'amount',
-        'amplitude', 'change_pct', 'change', 'turnover']
+    klines = df[
+        ['date', 'open', 'high', 'low', 'close', 'volume']
     ].to_dict('records')
     
     return {
