@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import akshare as ak
 import random
 from app.service.akshare_service import stock_processor
-from app.service.stock import get_stock_data_daily_bao
+from app.service.stock import get_stock_data_daily_bao, query_stock
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
 
@@ -22,6 +22,17 @@ MOCK_STOCKS = [
     {"code": "601211", "name": "国泰海通", "market": "sh"},
 ]
 
+
+@router.get("/list", response_model=list)
+async def list_stocks(params: dict = Query(default={})):
+    """
+    获取股票列表
+    """
+    return {
+        "code": 200,
+        "message": "Success",
+        "data": query_stock(params)
+    }
 
 @router.get("/search", response_model=dict)
 async def search_stocks(
