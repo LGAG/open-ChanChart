@@ -18,6 +18,8 @@ MOCK_STOCKS = [
     {"code": "600036", "name": "招商银行", "market": "sh"},
     {"code": "600519", "name": "贵州茅台", "market": "sh"},
     {"code": "000858", "name": "五粮液", "market": "sz"},
+    {"code": "300927", "name": "江天化学", "market": "sz"},
+    {"code": "601211", "name": "国泰海通", "market": "sh"},
 ]
 
 

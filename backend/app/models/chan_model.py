@@ -14,6 +14,7 @@ class ClassicChanKline(BaseModel):
 class Fractal(BaseModel):
     """分型数据模型"""
     index: int = Field(..., description="K线索引")
+    date: str = Field(..., description="日期")
     type: str = Field(..., description="分型类型 top/bottom")
 
 

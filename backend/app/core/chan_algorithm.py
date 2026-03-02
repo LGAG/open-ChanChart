@@ -30,7 +30,7 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
         low=klines[0].low
     )
     processed = [first]
-    direction = None  # 'up' or 'down'
+    direction = 'up'  # 'up' or 'down', default 'up'
     count = 0
     
     for i in range(1, len(klines)):
@@ -94,13 +94,14 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
     return processed
 
 
-def identify_fractals(klines: List[ClassicChanKline]) -> List[Fractal]:
+def identify_fractals(klines: List[ClassicChanKline], raw_klines: List[KlineData]) -> List[Fractal]:
     """
     识别顶底分型
     顶分型：第二根K线的高点是三根中最高的，且第二根K线的低点也是三根中最高的
     底分型：第二根K线的低点是三根中最低的，且第二根K线的高点也是三根中最低的
     """
     fractals = []
+    start = 0
     
     for i in range(1, len(klines) - 1):
         prev_k = klines[i - 1]
@@ -110,16 +111,38 @@ def identify_fractals(klines: List[ClassicChanKline]) -> List[Fractal]:
         # 顶分型判断
         if (curr_k.high > prev_k.high and curr_k.high > next_k.high and
             curr_k.low > prev_k.low and curr_k.low > next_k.low):
+            date = curr_k.start
+            for k in range(start, len(raw_klines)):
+                if raw_klines[k].high == curr_k.high:
+                    date = raw_klines[k].date
+                    start = k + 1
+                    break
+                if raw_klines[k].date == curr_k.end:
+                    print("error: no match date found: ", curr_k)
+                    start = k + 1
+                    break
             fractals.append(Fractal(
                 index=curr_k.index,
+                date=date,
                 type="top"
             ))
         
         # 底分型判断
         elif (curr_k.low < prev_k.low and curr_k.low < next_k.low and
               curr_k.high < prev_k.high and curr_k.high < next_k.high):
+            date = curr_k.start
+            for k in range(start, len(raw_klines)):
+                if raw_klines[k].low == curr_k.low:
+                    date = raw_klines[k].date
+                    start = k + 1
+                    break
+                if raw_klines[k].date == curr_k.end:
+                    print("error: no match date found: ", curr_k)
+                    start = k + 1
+                    break
             fractals.append(Fractal(
                 index=curr_k.index,
+                date=date,
                 type="bottom"
             ))
     
@@ -148,8 +171,10 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
             pens.append(Pen(
                 start_index=fractals[left].index,
                 end_index=fractals[right].index,
-                start_date=klines[fractals[left].index].start,
-                end_date=klines[fractals[right].index].end,
+                start_date=fractals[left].date,
+                end_date=fractals[right].date,
+                # start_date=klines[fractals[left].index].start,
+                # end_date=klines[fractals[right].index].end,
                 direction="up" if fractals[left].type == "bottom" else "down"
             ))
             left += 1
@@ -168,19 +193,19 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
             direction = "up" if start_fractal.type == "bottom" else "down"
             if direction == pens[-1].direction:
                 pens[-1].end_index = end_fractal.index
-                pens[-1].end_date = klines[end_fractal.index].end
+                pens[-1].end_date = end_fractal.date
             else:
-                # 除非有新的反向笔生成，否则一律对最近的一笔进行延申
+                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
                 pens.append(Pen(
                     start_index=start_fractal.index,
                     end_index=end_fractal.index,
-                    start_date=klines[start_fractal.index].start,
-                    end_date=klines[end_fractal.index].end,
+                    start_date=start_fractal.date,
+                    end_date=end_fractal.date,
                     direction=direction
                 ))
         else:
             pens[-1].end_index = end_fractal.index
-            pens[-1].end_date = klines[end_fractal.index].end
+            pens[-1].end_date = end_fractal.date
         left += 1
         right += 1
     
@@ -291,7 +316,7 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True, l
     for kline in processed_klines:
         print(kline)
     # 2. 识别分型
-    fractals = identify_fractals(processed_klines)
+    fractals = identify_fractals(processed_klines, klines)
     
     # 3. 生成笔
     pens = generate_pens(fractals, processed_klines)
