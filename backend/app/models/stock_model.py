@@ -33,3 +33,9 @@ class KlineRequest(BaseModel):
     period: str = Field(default="D", description="周期 D/30F/5F")
     start_date: Optional[str] = Field(None, description="开始日期")
     end_date: Optional[str] = Field(None, description="结束日期")
+
+class StockListResponse(BaseModel):
+    """股票列表响应模型"""
+    code: int = Field(..., description="状态码")
+    message: str = Field(..., description="消息")
+    data: list[StockInfo] = Field(default_factory=list, description="股票列表")

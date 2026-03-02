@@ -12,9 +12,9 @@ services:
       ports:
         - "3306:3306"
       volumes:
-        - ./app/mysql/data/:/var/lib/mysql/
-        - ./app/mysql/conf/:/etc/mysql/conf.d/
-        - ./app/mysql/init/:/docker-entrypoint-initdb.d/
+        - mysql_data:/var/lib/mysql/
+        - mysql_conf:/etc/mysql/conf.d/
+        - mysql_init:/docker-entrypoint-initdb.d/
       command:
         --default-authentication-plugin=mysql_native_password
         --character-set-server=utf8mb4
@@ -27,3 +27,8 @@ services:
 networks:
   mysql_elk_net:
     driver: bridge
+
+volumes:
+  mysql_data:
+  mysql_conf:
+  mysql_init:

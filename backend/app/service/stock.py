@@ -4,7 +4,8 @@ import pandas as pd
 from datetime import datetime
 import time
 from app.utils.middleware import Mysql_client, MysqlClient
-from sqlalchemy import text
+from sqlalchemy import text, MetaData, Table
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 def get_stock_data_daily_sina(code: str, market: str, period: str, start_timestamp: str = None, end_timestamp: str = None):
     try:
@@ -67,13 +68,21 @@ def update_all_stock(day="2026-02-27"):
         df['market'] = df['market'].str.lower()
         df = df.drop(columns=['code','tradeStatus'])
         df.rename(columns={'new_code': 'code', "code_name":"name"}, inplace=True)
-        df.to_sql(
-            name="stock",
-            con=Mysql_client.get_engine(),
-            if_exists="append",
-            index=False,
-            chunksize=1000
+        data = df.to_dict('records')
+        engine = Mysql_client.get_engine()
+        metadata = MetaData()
+        stock_index_table = Table(
+            'stock',
+            metadata,
+            autoload_with=engine
         )
+        data = df.to_dict('records')
+        insert_stmt = mysql_insert(stock_index_table).values(data)
+        update_stmt = {col: insert_stmt.inserted[col] for col in df.columns}
+        upsert_stmt = insert_stmt.on_duplicate_key_update(**update_stmt)
+        with engine.connect() as conn:
+            conn.execute(upsert_stmt)
+            conn.commit()
         return df
     except Exception as e:
         print("error: ",e)

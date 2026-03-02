@@ -1,11 +1,12 @@
 """股票数据API接口"""
-from fastapi import APIRouter, Query
-from typing import Optional
+from fastapi import APIRouter, Query, Body
+from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 import akshare as ak
 import random
 from app.service.akshare_service import stock_processor
 from app.service.stock import get_stock_data_daily_bao, query_stock
+from app.models.stock_model import StockListResponse
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
 
@@ -23,16 +24,18 @@ MOCK_STOCKS = [
 ]
 
 
-@router.get("/list", response_model=list)
-async def list_stocks(params: dict = Query(default={})):
+@router.post("/list", response_model=StockListResponse)
+async def list_stocks(params: Optional[Dict[str, Any]] = Body(default=None)):
     """
     获取股票列表
     """
-    return {
-        "code": 200,
-        "message": "Success",
-        "data": query_stock(params)
-    }
+    if params is None:
+        params = {}
+    return StockListResponse(
+        code=200,
+        message="Success",
+        data=query_stock(params)
+    )
 
 @router.get("/search", response_model=dict)
 async def search_stocks(
