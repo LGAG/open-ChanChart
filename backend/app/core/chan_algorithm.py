@@ -173,8 +173,6 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
                 end_index=fractals[right].index,
                 start_date=fractals[left].date,
                 end_date=fractals[right].date,
-                # start_date=klines[fractals[left].index].start,
-                # end_date=klines[fractals[right].index].end,
                 direction="up" if fractals[left].type == "bottom" else "down"
             ))
             left += 1

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import akshare as ak
 import random
 from app.service.akshare_service import stock_processor
-from app.service.stock import get_stock_data_daily_bao, query_stock
+from app.service.stock import get_stock_data_daily_bao, query_stock, get_stock_data_bao
 from app.models.stock_model import StockListResponse
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
@@ -73,13 +73,15 @@ async def get_kline_data(
     获取股票K线数据
     """
     print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
-    df = get_stock_data_daily_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
+    df = get_stock_data_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
     print(df.info())
 
     # 只保留需要的列并转换
+    if period == "hour" or period == '60' or period == '60F':
+        df['date'] = df['end_time']
     klines = df[
-        ['date', 'open', 'high', 'low', 'close', 'volume', 'period', 'level', 'code']
-    ].to_dict('records')
+            ['date', 'open', 'high', 'low', 'close', 'volume', 'period', 'level', 'code']
+        ].to_dict('records')
     
     return {
         "code": 200,

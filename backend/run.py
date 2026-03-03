@@ -49,6 +49,23 @@ def init_tables():
     """
     # 配置所有需要初始化的表：键=表名，值=建表SQL
     TABLE_CONFIG = {
+        "hour": """
+            CREATE TABLE `hour` (
+              `period` VARCHAR(20) NOT NULL COMMENT '周期',
+              `level` INT NOT NULL COMMENT '级别',
+              `start_time` DATETIME NOT NULL COMMENT '开始时间',
+              `end_time` DATETIME NOT NULL COMMENT '结束时间',
+              `code` VARCHAR(20) NOT NULL COMMENT '股票代码',
+              `market` VARCHAR(20) NOT NULL COMMENT '交易所',
+              `open` DECIMAL(10,2) NOT NULL COMMENT '开盘价',
+              `high` DECIMAL(10,2) NOT NULL COMMENT '最高价',
+              `low` DECIMAL(10,2) NOT NULL COMMENT '最低价',
+              `close` DECIMAL(10,2) NOT NULL COMMENT '收盘价',
+              `volume` DECIMAL(16,2) DEFAULT NULL COMMENT '成交量',
+              PRIMARY KEY (`code`, `start_time`, `market`),
+              KEY `idx_date_code_period_level` (`start_time`, `code`, `period`, `level`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='小时线数据表';
+        """,
         "day": """
             CREATE TABLE `day` (
               `period` VARCHAR(20) NOT NULL COMMENT '周期',
