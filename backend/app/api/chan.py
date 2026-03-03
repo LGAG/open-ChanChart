@@ -15,8 +15,8 @@ async def get_chan_analysis(
     market: str = Query(default="sh", description="市场类型"),
     period: str = Query(default="D", description="周期 D/30F/5F"),
     process_include: bool = Query(default=True, description="是否处理包含关系"),
-    start_date: Optional[str] = Query("20250101", description="开始日期 YYYYMMDD"),
-    end_date: Optional[str] = Query("20260226", description="结束日期 YYYYMMDD")
+    start_date: str = Query("20250101", description="开始日期 YYYYMMDD"),
+    end_date: str = Query("20260226", description="结束日期 YYYYMMDD")
 ):
     """
     获取缠论分析数据

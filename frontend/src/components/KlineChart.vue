@@ -47,9 +47,13 @@ const updateChart = () => {
   if (props.chanData.pens) {
     props.chanData.pens.forEach(pen => {
       props.chanData.chan_klines[pen.start_index].start
-      
-      penLineData.push([props.chanData.chan_klines[pen.start_index].start, props.chanData.chan_klines[pen.start_index].low])
-      penLineData.push([props.chanData.chan_klines[pen.end_index].end, props.chanData.chan_klines[pen.end_index].high])
+      if (pen.direction === 'up') {
+        penLineData.push([pen.start_date, props.chanData.chan_klines[pen.start_index].low])
+        penLineData.push([pen.end_date, props.chanData.chan_klines[pen.end_index].high])
+      } else {
+        penLineData.push([pen.start_date, props.chanData.chan_klines[pen.start_index].high])
+        penLineData.push([pen.end_date, props.chanData.chan_klines[pen.end_index].low])
+      }
       penLineData.push([null, null]) // Break line between pens
     })
   }

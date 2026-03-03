@@ -66,8 +66,8 @@ async def get_kline_data(
     code: str = Query(..., description="股票代码"),
     market: str = Query(default="sh", description="市场类型"),
     period: str = Query(default="daily", description="周期 D/30F/5F"),
-    start_date: Optional[str] = Query(default="20250101", description="开始日期 YYYYMMDD"),
-    end_date: Optional[str] = Query(default="20260226", description="结束日期 YYYYMMDD")
+    start_date: str = Query(default="20250101", description="开始日期 YYYYMMDD"),
+    end_date: str = Query(default="20260226", description="结束日期 YYYYMMDD")
 ):
     """
     获取股票K线数据

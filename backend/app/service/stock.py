@@ -42,16 +42,23 @@ def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestam
         df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
         df['market'] = df['market'].str.lower()
         df = df.drop(columns=['code'])
-        df.rename(columns={'code_new': 'code'}, inplace=True)
+        df.rename(columns={'new_code': 'code'}, inplace=True)
 
-        
-        df.to_sql(
-            name="day",
-            con=Mysql_client.get_engine(),
-            if_exists="append",
-            index=False,
-            chunksize=1000
+        data = df.to_dict('records')
+        engine = Mysql_client.get_engine()
+        metadata = MetaData()
+        stock_index_table = Table(
+            'day',
+            metadata,
+            autoload_with=engine
         )
+        data = df.to_dict('records')
+        insert_stmt = mysql_insert(stock_index_table).values(data)
+        update_stmt = {col: insert_stmt.inserted[col] for col in df.columns}
+        upsert_stmt = insert_stmt.on_duplicate_key_update(**update_stmt)
+        with engine.connect() as conn:
+            conn.execute(upsert_stmt)
+            conn.commit()
         return df
     except Exception as e:
         print("error: ",e)
