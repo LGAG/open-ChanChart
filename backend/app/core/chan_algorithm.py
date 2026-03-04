@@ -24,8 +24,8 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
     
     first = ClassicChanKline(
         index=0,
-        start=klines[0].date,
-        end=klines[0].date,
+        start=0,
+        end=0,
         high=klines[0].high,
         low=klines[0].low
     )
@@ -36,8 +36,8 @@ def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
     for i in range(1, len(klines)):
         current = ClassicChanKline(
             index=i,
-            start=klines[i].date,
-            end=klines[i].date,
+            start=i,
+            end=i,
             high=klines[i].high,
             low=klines[i].low
         )
@@ -111,38 +111,34 @@ def identify_fractals(klines: List[ClassicChanKline], raw_klines: List[KlineData
         # 顶分型判断
         if (curr_k.high > prev_k.high and curr_k.high > next_k.high and
             curr_k.low > prev_k.low and curr_k.low > next_k.low):
-            date = curr_k.start
-            for k in range(start, len(raw_klines)):
+            k_index = curr_k.end
+            for k in range(curr_k.end, curr_k.start - 1, -1):
                 if raw_klines[k].high == curr_k.high:
-                    date = raw_klines[k].date
-                    start = k + 1
+                    k_index = k
                     break
-                if raw_klines[k].date == curr_k.end:
+                if k == curr_k.start:
                     print("error: no match date found: ", curr_k)
-                    start = k + 1
-                    break
             fractals.append(Fractal(
                 index=curr_k.index,
-                date=date,
+                k_index=k_index,
+                date=raw_klines[k_index].date,
                 type="top"
             ))
         
         # 底分型判断
         elif (curr_k.low < prev_k.low and curr_k.low < next_k.low and
               curr_k.high < prev_k.high and curr_k.high < next_k.high):
-            date = curr_k.start
-            for k in range(start, len(raw_klines)):
+            k_index = curr_k.end
+            for k in range(curr_k.end, curr_k.start - 1, -1):
                 if raw_klines[k].low == curr_k.low:
-                    date = raw_klines[k].date
-                    start = k + 1
+                    k_index = k
                     break
-                if raw_klines[k].date == curr_k.end:
+                if k == curr_k.start:
                     print("error: no match date found: ", curr_k)
-                    start = k + 1
-                    break
             fractals.append(Fractal(
                 index=curr_k.index,
-                date=date,
+                k_index=k_index,
+                date=raw_klines[k_index].date,
                 type="bottom"
             ))
     
@@ -152,7 +148,7 @@ def identify_fractals(klines: List[ClassicChanKline], raw_klines: List[KlineData
 def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
     """
     生成笔
-    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根K线
+    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根缠论K线
     """
     if len(fractals) < 2:
         return []
@@ -188,6 +184,67 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
         
         # 检查是否符合笔的条件：类型交替且间隔足够
         if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 4:
+            direction = "up" if start_fractal.type == "bottom" else "down"
+            if direction == pens[-1].direction:
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+            else:
+                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
+                pens.append(Pen(
+                    start_index=start_fractal.index,
+                    end_index=end_fractal.index,
+                    start_date=start_fractal.date,
+                    end_date=end_fractal.date,
+                    direction=direction
+                ))
+        else:
+            pens[-1].end_index = end_fractal.index
+            pens[-1].end_date = end_fractal.date
+        left += 1
+        right += 1
+    
+    # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
+    return pens
+
+def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
+    """
+    生成新笔
+    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根K线
+    """
+    if len(fractals) < 2:
+        return []
+    
+    pens = []
+    
+    left = 0
+    right = 1
+    
+    # 第一步：找到第一根笔
+    for i in range(1, len(fractals)):
+        # 实际上第一个条件永远成立，但是为了保险起见还是判断一下吧
+        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 3 and abs(klines[fractals[i].index].start - klines[fractals[i - 1].index].end) >= 4:
+            left = i - 1
+            right = i
+            pens.append(Pen(
+                start_index=fractals[left].index,
+                end_index=fractals[right].index,
+                start_date=fractals[left].date,
+                end_date=fractals[right].date,
+                direction="up" if fractals[left].type == "bottom" else "down"
+            ))
+            left += 1
+            right += 1
+            break
+    if len(pens) == 0:
+        return []
+    # 然后才是逐个处理后面的顶底分型
+    while right < len(fractals):
+        start_fractal = fractals[left]
+        end_fractal = fractals[right]
+        print(f"start_fractal: {start_fractal}, end_fractal: {end_fractal}")
+        
+        # 检查是否符合笔的条件：类型交替且间隔足够
+        if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 3 and abs(klines[end_fractal.index].start - klines[start_fractal.index].end) >= 4:
             direction = "up" if start_fractal.type == "bottom" else "down"
             if direction == pens[-1].direction:
                 pens[-1].end_index = end_fractal.index
@@ -317,7 +374,7 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True, l
     fractals = identify_fractals(processed_klines, klines)
     
     # 3. 生成笔
-    pens = generate_pens(fractals, processed_klines)
+    pens = generate_new_pens(fractals, processed_klines)
     
     return{
         "chan_klines": processed_klines,

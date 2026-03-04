@@ -43,11 +43,17 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
             period = "d"
             start = datetime.strptime(start_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
             end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            rs = bs.query_history_k_data_plus(f"{market}.{code}", "date,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="1")
+            rs = bs.query_history_k_data_plus(f"{market}.{code}", "date,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="3")
             print('query_history_k_data_plus respond error_code:'+rs.error_code)
             print('query_history_k_data_plus respond  error_msg:'+rs.error_msg)
             df = rs.get_data()
             
+            df['volume'] = df['volume'].astype(str).replace({
+                '': '0',
+                'nan': '0',
+                'None': '0'
+            })
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
             df['period'] = 'day'
             df['level'] = 6
             df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
@@ -59,7 +65,7 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
             period = "60"
             start = datetime.strptime(start_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
             end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            rs = bs.query_history_k_data_plus(f"{market}.{code}", "time,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="1")
+            rs = bs.query_history_k_data_plus(f"{market}.{code}", "time,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="3")
             print('query_history_k_data_plus respond error_code:'+rs.error_code)
             print('query_history_k_data_plus respond  error_msg:'+rs.error_msg)
             df = rs.get_data()

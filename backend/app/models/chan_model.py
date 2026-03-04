@@ -5,15 +5,16 @@ DAY = "day"
 
 class ClassicChanKline(BaseModel):
     """缠论k线数据模型"""
-    index: int = Field(..., description="K线索引")
-    start: str = Field(..., description="开始时间")
-    end: str = Field(..., description="结束时间")
+    index: int = Field(..., description="缠论K线索引")
+    start: int = Field(..., description="开始k线索引")
+    end: int = Field(..., description="结束k线索引")
     high: float = Field(..., description="最高价")
     low: float = Field(..., description="最低价")
 
 class Fractal(BaseModel):
     """分型数据模型"""
-    index: int = Field(..., description="K线索引")
+    index: int = Field(..., description="缠论K线索引")
+    k_index: int = Field(..., description="K线索引")
     date: str = Field(..., description="日期")
     type: str = Field(..., description="分型类型 top/bottom")
 
