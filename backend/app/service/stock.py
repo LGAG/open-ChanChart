@@ -185,10 +185,10 @@ def query_stock(sql, params=None):
     try:
         engine = Mysql_client.get_engine()
         with engine.connect() as conn:
-            result = conn.execute(text(sql), params or {})
+            result = conn.execute(text(sql))
             
-            columns = [col.name for col in result.keys()]
-            data_list = [dict(zip(columns, row)) for row in result.fetchall()]
+            row_mappings = result.mappings().all()
+            data_list = [dict(row) for row in row_mappings]
         
         print(f"✅ 查询成功，共返回 {len(data_list)} 条数据")
         return data_list

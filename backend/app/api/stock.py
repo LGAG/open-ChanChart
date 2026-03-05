@@ -23,6 +23,10 @@ MOCK_STOCKS = [
     {"code": "601211", "name": "国泰海通", "market": "sh"},
 ]
 
+LIST_STOCKS = [
+
+]
+
 
 @router.post("/list", response_model=StockListResponse)
 async def list_stocks(params: Optional[Dict[str, Any]] = Body(default=None)):
@@ -31,6 +35,10 @@ async def list_stocks(params: Optional[Dict[str, Any]] = Body(default=None)):
     """
     if params is None:
         params = {}
+    
+    global LIST_STOCKS
+    LIST_STOCKS = query_stock("SELECT * FROM STOCK", params)
+
     return StockListResponse(
         code=200,
         message="Success",
@@ -46,13 +54,18 @@ async def search_stocks(
     搜索股票
     """
     results = []
+    global LIST_STOCKS
+    if len(LIST_STOCKS) == 0:
+        LIST_STOCKS = query_stock("SELECT * FROM stock")
     
-    for stock in MOCK_STOCKS:
+    for stock in LIST_STOCKS:
         # 匹配关键词
         if keyword.lower() in stock["code"].lower() or keyword in stock["name"]:
             # 如果指定了市场，则过滤
             if market is None or stock["market"] == market:
                 results.append(stock)
+                if len(results) >= 5:
+                    break
     
     return {
         "code": 200,
