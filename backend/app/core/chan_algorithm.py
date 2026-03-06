@@ -1,5 +1,5 @@
 """缠论核心算法实现"""
-from typing import List
+from typing import List, Tuple
 from app.models.stock_model import KlineData
 from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu, DAY
 
@@ -206,6 +206,23 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
     # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
     return pens
 
+def find_first_pen(fractals: List[Fractal], klines: List[ClassicChanKline], start: int) -> Tuple[Pen, int, int]:
+    """
+    找到第一根笔
+    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根缠论K线
+    """
+    for i in range(start + 1, len(fractals)):
+        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 4:
+            pen = Pen(
+                start_index=fractals[i - 1].index,
+                end_index=fractals[i].index,
+                start_date=fractals[i - 1].date,
+                end_date=fractals[i].date,
+                direction="up" if fractals[i - 1].type == "bottom" else "down"
+            )
+            return pen, i, i + 1
+    return None, start, start
+
 def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
     """
     生成新笔
@@ -220,23 +237,12 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
     right = 1
     
     # 第一步：找到第一根笔
-    for i in range(1, len(fractals)):
-        # 实际上第一个条件永远成立，但是为了保险起见还是判断一下吧
-        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 3 and abs(klines[fractals[i].index].start - klines[fractals[i - 1].index].end) >= 4:
-            left = i - 1
-            right = i
-            pens.append(Pen(
-                start_index=fractals[left].index,
-                end_index=fractals[right].index,
-                start_date=fractals[left].date,
-                end_date=fractals[right].date,
-                direction="up" if fractals[left].type == "bottom" else "down"
-            ))
-            left += 1
-            right += 1
-            break
+    first_pen, left, right = find_first_pen(fractals, klines, left)
+    if first_pen is not None:
+        pens.append(first_pen)
     if len(pens) == 0:
         return []
+    
     # 然后才是逐个处理后面的顶底分型
     while right < len(fractals):
         start_fractal = fractals[left]
@@ -258,11 +264,48 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
                     end_date=end_fractal.date,
                     direction=direction
                 ))
-        else:
-            if pens[-1].direction == "up" and end_fractal.type == "top":
+        # 如果存在反向缺口，则也能生成笔
+        elif (pens[-1].direction == "up" and end_fractal.type == "bottom" and klines[start_fractal.index + 1].high <= klines[pens[-1].start_index].low) or (pens[-1].direction == "down" and end_fractal.type == "top" and klines[start_fractal.index + 1].low >= klines[pens[-1].start_index].high):
+            direction = "up" if start_fractal.type == "bottom" else "down"
+            if direction == pens[-1].direction:
                 pens[-1].end_index = end_fractal.index
                 pens[-1].end_date = end_fractal.date
-            elif pens[-1].direction == "down" and end_fractal.type == "bottom":
+            else:
+                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
+                pens.append(Pen(
+                    start_index=start_fractal.index,
+                    end_index=end_fractal.index,
+                    start_date=start_fractal.date,
+                    end_date=end_fractal.date,
+                    direction=direction
+                ))
+        else:
+            if pens[-1].direction == "down" and end_fractal.type == "bottom":
+                if klines[pens[-1].start_index].high < klines[end_fractal.index].low:
+                    pens.pop()
+                    if len(pens) == 0:
+                        first_pen, left, right = find_first_pen(fractals, klines, left)
+                        if first_pen is not None:
+                            pens.append(first_pen)
+                        else:
+                            return pens
+                    pens[-1].end_index = start_fractal.index
+                    pens[-1].end_date = start_fractal.date
+                    continue
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+            elif pens[-1].direction == "up" and end_fractal.type == "top":
+                if klines[pens[-1].start_index].low > klines[end_fractal.index].high:
+                    pens.pop()
+                    if len(pens) == 0:
+                        first_pen, left, right = find_first_pen(fractals, klines, left)
+                        if first_pen is not None:
+                            pens.append(first_pen)
+                        else:
+                            return pens
+                    pens[-1].end_index = start_fractal.index
+                    pens[-1].end_date = start_fractal.date
+                    continue
                 pens[-1].end_index = end_fractal.index
                 pens[-1].end_date = end_fractal.date
 
