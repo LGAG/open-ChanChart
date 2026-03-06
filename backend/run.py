@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 from app.utils.middleware import MysqlClient, Mysql_client
 from app.service.stock import update_all_stock
+from app.api.stock import list_stocks
 
 def _check_and_create_table(conn, table_name, create_sql):
     """
