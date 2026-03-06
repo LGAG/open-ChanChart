@@ -259,11 +259,17 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
                     direction=direction
                 ))
         else:
-            pens[-1].end_index = end_fractal.index
-            pens[-1].end_date = end_fractal.date
+            if pens[-1].direction == "up" and end_fractal.type == "top":
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+            elif pens[-1].direction == "down" and end_fractal.type == "bottom":
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+
         left += 1
         right += 1
     
+    print(pens)
     # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
     return pens
 
