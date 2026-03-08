@@ -212,7 +212,7 @@ def find_first_pen(fractals: List[Fractal], klines: List[ClassicChanKline], star
     笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根缠论K线
     """
     for i in range(start + 1, len(fractals)):
-        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 4:
+        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 3 and abs(klines[fractals[i].index].start - klines[fractals[i - 1].index].end) >= 4:
             pen = Pen(
                 start_index=fractals[i - 1].index,
                 end_index=fractals[i].index,
