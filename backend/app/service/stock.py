@@ -101,6 +101,8 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
     except Exception as e:
         print("error: ",e)
         return False
+    finally:
+        bs.logout()
 
 
 def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestamp: str = None, end_timestamp: str = None):
@@ -142,6 +144,8 @@ def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestam
     except Exception as e:
         print("error: ",e)
         return False
+    finally:
+        bs.logout()
     
 def update_all_stock(day="2026-02-27"):
     try:
@@ -173,6 +177,8 @@ def update_all_stock(day="2026-02-27"):
     except Exception as e:
         print("error: ",e)
         return False
+    finally:
+        bs.logout()
 
 def query_stock(sql, params=None):
     """

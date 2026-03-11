@@ -39,12 +39,12 @@ async def list_stocks(params: Optional[Dict[str, Any]] = Body(default=None)):
         params = {}
     
     global LIST_STOCKS
-    LIST_STOCKS = query_stock("SELECT * FROM STOCK", params)
+    LIST_STOCKS = query_stock("SELECT * FROM stock", params)
 
     return StockListResponse(
         code=200,
         message="Success",
-        data=query_stock(params)
+        data=LIST_STOCKS
     )
 
 @router.get("/search", response_model=dict)
@@ -81,15 +81,18 @@ async def get_kline_data(
     code: str = Query(..., description="股票代码"),
     market: str = Query(default="sh", description="市场类型"),
     period: str = Query(default="daily", description="周期 D/30F/5F"),
-    start_date: str = Query(default="20250101", description="开始日期 YYYYMMDD"),
-    end_date: str = Query(default="20260226", description="结束日期 YYYYMMDD")
+    start_date: str = Query(default="2025-01-01", description="开始日期 YYYY-MM-DD"),
+    end_date: str = Query(default="2026-02-26", description="结束日期 YYYY-MM-DD")
 ):
     """
     获取股票K线数据
     """
     print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
     df = get_stock_data_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
-    print(df.info())
+    if df is False:
+        print("获取数据失败，返回False")
+    else:
+        print(df.info())
 
     # 只保留需要的列并转换
     if period == "hour" or period == '60' or period == '60F':

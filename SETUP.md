@@ -10,7 +10,7 @@ This is a working prototype of the ChanChart system - a stock market visualizati
 
 ## Installation
 
-### Middlewire Setup
+### Middleware Setup
 
 1. Navigate to the backend directory:
 ```bash
