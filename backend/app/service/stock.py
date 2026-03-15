@@ -81,6 +81,26 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
             df = df.drop(columns=['code','time'])
             df.rename(columns={'new_code': 'code'}, inplace=True)
             period = 'hour'
+        elif period == "30F":
+            period = "30"
+            start = datetime.strptime(start_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
+            end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
+            rs = bs.query_history_k_data_plus(f"{market}.{code}", "time,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="3")
+            print('query_history_k_data_plus respond error_code:'+rs.error_code)
+            print('query_history_k_data_plus respond  error_msg:'+rs.error_msg)
+            df = rs.get_data()
+            
+            df['period'] = 'hour'
+            df['level'] = 5
+            df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
+            df['market'] = df['market'].str.lower()
+            df['end_time'] = df['time'].apply(parse_time_to_minute)
+            df["start_time"] = df["end_time"] - timedelta(hours=1)
+            df['start_time'] = df['start_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
+            df['end_time'] = df['end_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
+            df = df.drop(columns=['code','time'])
+            df.rename(columns={'new_code': 'code'}, inplace=True)
+            period = 'half'
             
         data = df.to_dict('records')
         engine = Mysql_client.get_engine()

@@ -14,7 +14,7 @@
           <el-radio-group v-model="period" @change="loadData">
             <el-radio-button label="daily">日K</el-radio-button>
             <el-radio-button label="60F">1小时</el-radio-button>
-            <el-radio-button label="15F" disabled>15分</el-radio-button>
+            <el-radio-button label="30F">30分</el-radio-button>
           </el-radio-group>
         </div>
 

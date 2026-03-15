@@ -92,7 +92,7 @@ async def get_kline_data(
     print(df.info())
 
     # 只保留需要的列并转换
-    if period == "hour" or period == '60' or period == '60F':
+    if period == "hour" or period == '60' or period == '60F' or period == '30F' or period == '5F':
         df['date'] = df['end_time']
     klines = df[
             ['date', 'open', 'high', 'low', 'close', 'volume', 'period', 'level', 'code']
