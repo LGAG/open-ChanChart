@@ -227,7 +227,7 @@ def init_daily_table():
                   `amount` DECIMAL(18,2) DEFAULT NULL COMMENT '成交额',
                   `amplitude` DECIMAL(8,2) DEFAULT NULL COMMENT '振幅',
                   `change` DECIMAL(8,2) DEFAULT NULL COMMENT '涨跌幅',
-                  `turnover` DECIMAL(8,4) DEFAULT NULL COMMENT 换手率',
+                  `turnover` DECIMAL(8,4) DEFAULT NULL COMMENT '换手率',
                    PRIMARY KEY (`code`, `date`, `market`),
                   -- 复合索引：提升(date+code+period+level)组合查询效率
                   KEY `idx_date_code_period_level` (`date`, `code`, `period`, `level`)
@@ -258,7 +258,6 @@ if __name__ == "__main__":
             print(f"Failed to initialize MysqlClient: {e}")
     init_tables()
     res = update_all_stock()
-    print(res.info())
     
     host = os.getenv("API_HOST", "0.0.0.0")
     port = int(os.getenv("API_PORT", "8000"))
