@@ -4,12 +4,19 @@ from typing import Optional
 
 class KlineData(BaseModel):
     """K线数据模型"""
+    period: str = Field(..., description="周期")
+    level: int = Field(..., description="级别")
     date: str = Field(..., description="日期")
+    code: str = Field(..., description="股票代码")
     open: float = Field(..., description="开盘价")
     high: float = Field(..., description="最高价")
     low: float = Field(..., description="最低价")
     close: float = Field(..., description="收盘价")
     volume: float = Field(..., description="成交量")
+    amount: Optional[float] = Field(None, description="成交额")
+    amplitude: Optional[float] = Field(None, description="振幅")
+    change: Optional[float] = Field(None, description="涨跌幅")
+    turnover: Optional[float] = Field(None, description="换手率")
 
 
 class StockInfo(BaseModel):
@@ -26,3 +33,9 @@ class KlineRequest(BaseModel):
     period: str = Field(default="D", description="周期 D/30F/5F")
     start_date: Optional[str] = Field(None, description="开始日期")
     end_date: Optional[str] = Field(None, description="结束日期")
+
+class StockListResponse(BaseModel):
+    """股票列表响应模型"""
+    code: int = Field(..., description="状态码")
+    message: str = Field(..., description="消息")
+    data: list[StockInfo] = Field(default_factory=list, description="股票列表")

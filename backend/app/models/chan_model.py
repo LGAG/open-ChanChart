@@ -1,12 +1,21 @@
 from pydantic import BaseModel, Field
 from typing import List
 
+DAY = "day"
+
+class ClassicChanKline(BaseModel):
+    """缠论k线数据模型"""
+    index: int = Field(..., description="缠论K线索引")
+    start: int = Field(..., description="开始k线索引")
+    end: int = Field(..., description="结束k线索引")
+    high: float = Field(..., description="最高价")
+    low: float = Field(..., description="最低价")
 
 class Fractal(BaseModel):
     """分型数据模型"""
-    index: int = Field(..., description="K线索引")
+    index: int = Field(..., description="缠论K线索引")
+    k_index: int = Field(..., description="K线索引")
     date: str = Field(..., description="日期")
-    price: float = Field(..., description="价格")
     type: str = Field(..., description="分型类型 top/bottom")
 
 
@@ -16,13 +25,11 @@ class Pen(BaseModel):
     end_index: int = Field(..., description="结束K线索引")
     start_date: str = Field(..., description="起始日期")
     end_date: str = Field(..., description="结束日期")
-    start_price: float = Field(..., description="起始价格")
-    end_price: float = Field(..., description="结束价格")
     direction: str = Field(..., description="方向 up/down")
 
 
 class Segment(BaseModel):
-    """段数据模型"""
+    """线段数据模型"""
     start_index: int = Field(..., description="起始笔索引")
     end_index: int = Field(..., description="结束笔索引")
     pens: List[Pen] = Field(..., description="包含的笔列表")

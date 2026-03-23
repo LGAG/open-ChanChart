@@ -1,10 +1,10 @@
 """缠论核心算法实现"""
-from typing import List
+from typing import List, Tuple
 from app.models.stock_model import KlineData
-from app.models.chan_model import Fractal, Pen, Segment, ZhongShu
+from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu, DAY
 
 
-def is_kline_contained(k1: KlineData, k2: KlineData) -> bool:
+def is_kline_contained(k1: ClassicChanKline, k2: ClassicChanKline) -> bool:
     """
     判断两根K线是否存在包含关系
     包含关系：一根K线的高低点完全包含另一根K线，或被另一根K线包含
@@ -13,7 +13,7 @@ def is_kline_contained(k1: KlineData, k2: KlineData) -> bool:
            (k1.high >= k2.high and k1.low <= k2.low)
 
 
-def process_inclusion(klines: List[KlineData]) -> List[KlineData]:
+def process_inclusion(klines: List[KlineData]) -> List[ClassicChanKline]:
     """
     处理K线包含关系
     在上升趋势中，取两根K线的最高价为新K线最高价，两根K线的较高的最低价为新K线最低价
@@ -22,11 +22,25 @@ def process_inclusion(klines: List[KlineData]) -> List[KlineData]:
     if len(klines) < 2:
         return klines
     
-    processed = [klines[0]]
-    direction = None  # 'up' or 'down'
+    first = ClassicChanKline(
+        index=0,
+        start=0,
+        end=0,
+        high=klines[0].high,
+        low=klines[0].low
+    )
+    processed = [first]
+    direction = 'up'  # 'up' or 'down', default 'up'
+    count = 0
     
     for i in range(1, len(klines)):
-        current = klines[i]
+        current = ClassicChanKline(
+            index=i,
+            start=i,
+            end=i,
+            high=klines[i].high,
+            low=klines[i].low
+        )
         prev = processed[-1]
         
         # 判断是否存在包含关系
@@ -36,38 +50,43 @@ def process_inclusion(klines: List[KlineData]) -> List[KlineData]:
                 direction = 'up'
             elif current.high < prev.high:
                 direction = 'down'
-            processed.append(current)
+            count += 1
+            processed.append(ClassicChanKline(
+                index=count,
+                start=current.start,
+                end=current.end,
+                high=current.high,
+                low=current.low
+            ))
         else:
             # 有包含关系，根据方向处理
             if direction == 'up':
-                # 上升趋势：取高高低高
-                new_kline = KlineData(
-                    date=current.date,
-                    open=current.open,
+                # 上升趋势：取高中高，低中高
+                new_kline = ClassicChanKline(
+                    index=count,
+                    start=prev.start,
+                    end=current.end,
                     high=max(current.high, prev.high),
-                    low=max(current.low, prev.low),
-                    close=current.close,
-                    volume=current.volume + prev.volume
+                    low=max(current.low, prev.low)
                 )
             elif direction == 'down':
-                # 下降趋势：取低低高低
-                new_kline = KlineData(
-                    date=current.date,
-                    open=current.open,
+                # 下降趋势：取低中低，高中低
+                new_kline = ClassicChanKline(
+                    index=count,
+                    start=prev.start,
+                    end=current.end,
                     high=min(current.high, prev.high),
-                    low=min(current.low, prev.low),
-                    close=current.close,
-                    volume=current.volume + prev.volume
+                    low=min(current.low, prev.low)
                 )
             else:
                 # 方向未确定，默认合并
-                new_kline = KlineData(
-                    date=current.date,
-                    open=current.open,
-                    high=max(current.high, prev.high),
-                    low=min(current.low, prev.low),
-                    close=current.close,
-                    volume=current.volume + prev.volume
+                print(f"error: direction not determined: {direction}")
+                new_kline = ClassicChanKline(
+                    index=count,
+                    start=prev.start,
+                    end=current.end,
+                    high=current.high,
+                    low=current.low
                 )
             
             processed[-1] = new_kline
@@ -75,13 +94,14 @@ def process_inclusion(klines: List[KlineData]) -> List[KlineData]:
     return processed
 
 
-def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
+def identify_fractals(klines: List[ClassicChanKline], raw_klines: List[KlineData]) -> List[Fractal]:
     """
     识别顶底分型
     顶分型：第二根K线的高点是三根中最高的，且第二根K线的低点也是三根中最高的
     底分型：第二根K线的低点是三根中最低的，且第二根K线的高点也是三根中最低的
     """
     fractals = []
+    start = 0
     
     for i in range(1, len(klines) - 1):
         prev_k = klines[i - 1]
@@ -91,29 +111,121 @@ def identify_fractals(klines: List[KlineData]) -> List[Fractal]:
         # 顶分型判断
         if (curr_k.high > prev_k.high and curr_k.high > next_k.high and
             curr_k.low > prev_k.low and curr_k.low > next_k.low):
+            k_index = curr_k.end
+            for k in range(curr_k.end, curr_k.start - 1, -1):
+                if raw_klines[k].high == curr_k.high:
+                    k_index = k
+                    break
+                if k == curr_k.start:
+                    print("error: no match date found: ", curr_k)
             fractals.append(Fractal(
-                index=i,
-                date=curr_k.date,
-                price=curr_k.high,
+                index=curr_k.index,
+                k_index=k_index,
+                date=raw_klines[k_index].date,
                 type="top"
             ))
         
         # 底分型判断
         elif (curr_k.low < prev_k.low and curr_k.low < next_k.low and
               curr_k.high < prev_k.high and curr_k.high < next_k.high):
+            k_index = curr_k.end
+            for k in range(curr_k.end, curr_k.start - 1, -1):
+                if raw_klines[k].low == curr_k.low:
+                    k_index = k
+                    break
+                if k == curr_k.start:
+                    print("error: no match date found: ", curr_k)
             fractals.append(Fractal(
-                index=i,
-                date=curr_k.date,
-                price=curr_k.low,
+                index=curr_k.index,
+                k_index=k_index,
+                date=raw_klines[k_index].date,
                 type="bottom"
             ))
     
     return fractals
 
 
-def generate_pens(fractals: List[Fractal], klines: List[KlineData]) -> List[Pen]:
+def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
     """
     生成笔
+    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根缠论K线
+    """
+    if len(fractals) < 2:
+        return []
+    
+    pens = []
+    
+    left = 0
+    right = 1
+    
+    # 第一步：找到第一根笔
+    for i in range(1, len(fractals)):
+        # 实际上第一个条件永远成立，但是为了保险起见还是判断一下吧
+        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 4:
+            left = i - 1
+            right = i
+            pens.append(Pen(
+                start_index=fractals[left].index,
+                end_index=fractals[right].index,
+                start_date=fractals[left].date,
+                end_date=fractals[right].date,
+                direction="up" if fractals[left].type == "bottom" else "down"
+            ))
+            left += 1
+            right += 1
+            break
+    if len(pens) == 0:
+        return []
+    # 然后才是逐个处理后面的顶底分型
+    while right < len(fractals):
+        start_fractal = fractals[left]
+        end_fractal = fractals[right]
+        print(f"start_fractal: {start_fractal}, end_fractal: {end_fractal}")
+        
+        # 检查是否符合笔的条件：类型交替且间隔足够
+        if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 4:
+            direction = "up" if start_fractal.type == "bottom" else "down"
+            if direction == pens[-1].direction:
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+            else:
+                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
+                pens.append(Pen(
+                    start_index=start_fractal.index,
+                    end_index=end_fractal.index,
+                    start_date=start_fractal.date,
+                    end_date=end_fractal.date,
+                    direction=direction
+                ))
+        else:
+            pens[-1].end_index = end_fractal.index
+            pens[-1].end_date = end_fractal.date
+        left += 1
+        right += 1
+    
+    # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
+    return pens
+
+def find_first_pen(fractals: List[Fractal], klines: List[ClassicChanKline], start: int) -> Tuple[Pen, int, int]:
+    """
+    找到第一根笔
+    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根缠论K线
+    """
+    for i in range(start + 1, len(fractals)):
+        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 3 and abs(klines[fractals[i].index].start - klines[fractals[i - 1].index].end) >= 4:
+            pen = Pen(
+                start_index=fractals[i - 1].index,
+                end_index=fractals[i].index,
+                start_date=fractals[i - 1].date,
+                end_date=fractals[i].date,
+                direction="up" if fractals[i - 1].type == "bottom" else "down"
+            )
+            return pen, i, i + 1
+    return None, start, start
+
+def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
+    """
+    生成新笔
     笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根K线
     """
     if len(fractals) < 2:
@@ -121,24 +233,87 @@ def generate_pens(fractals: List[Fractal], klines: List[KlineData]) -> List[Pen]
     
     pens = []
     
-    for i in range(len(fractals) - 1):
-        start_fractal = fractals[i]
-        end_fractal = fractals[i + 1]
+    left = 0
+    right = 1
+    
+    # 第一步：找到第一根笔
+    first_pen, left, right = find_first_pen(fractals, klines, left)
+    if first_pen is not None:
+        pens.append(first_pen)
+    if len(pens) == 0:
+        return []
+    
+    # 然后才是逐个处理后面的顶底分型
+    while right < len(fractals):
+        start_fractal = fractals[left]
+        end_fractal = fractals[right]
+        print(f"start_fractal: {start_fractal}, end_fractal: {end_fractal}")
         
         # 检查是否符合笔的条件：类型交替且间隔足够
-        if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 2:
+        if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 3 and abs(klines[end_fractal.index].start - klines[start_fractal.index].end) >= 4:
             direction = "up" if start_fractal.type == "bottom" else "down"
-            
-            pens.append(Pen(
-                start_index=start_fractal.index,
-                end_index=end_fractal.index,
-                start_date=start_fractal.date,
-                end_date=end_fractal.date,
-                start_price=start_fractal.price,
-                end_price=end_fractal.price,
-                direction=direction
-            ))
+            if direction == pens[-1].direction:
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+            else:
+                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
+                pens.append(Pen(
+                    start_index=start_fractal.index,
+                    end_index=end_fractal.index,
+                    start_date=start_fractal.date,
+                    end_date=end_fractal.date,
+                    direction=direction
+                ))
+        # 如果存在反向缺口，则也能生成笔
+        elif (pens[-1].direction == "up" and end_fractal.type == "bottom" and klines[start_fractal.index + 1].high <= klines[pens[-1].start_index].low) or (pens[-1].direction == "down" and end_fractal.type == "top" and klines[start_fractal.index + 1].low >= klines[pens[-1].start_index].high):
+            direction = "up" if start_fractal.type == "bottom" else "down"
+            if direction == pens[-1].direction:
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+            else:
+                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
+                pens.append(Pen(
+                    start_index=start_fractal.index,
+                    end_index=end_fractal.index,
+                    start_date=start_fractal.date,
+                    end_date=end_fractal.date,
+                    direction=direction
+                ))
+        else:
+            if pens[-1].direction == "down" and end_fractal.type == "bottom":
+                if klines[pens[-1].start_index].high < klines[end_fractal.index].low:
+                    pens.pop()
+                    if len(pens) == 0:
+                        first_pen, left, right = find_first_pen(fractals, klines, left)
+                        if first_pen is not None:
+                            pens.append(first_pen)
+                        else:
+                            return pens
+                    pens[-1].end_index = start_fractal.index
+                    pens[-1].end_date = start_fractal.date
+                    continue
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+            elif pens[-1].direction == "up" and end_fractal.type == "top":
+                if klines[pens[-1].start_index].low > klines[end_fractal.index].high:
+                    pens.pop()
+                    if len(pens) == 0:
+                        first_pen, left, right = find_first_pen(fractals, klines, left)
+                        if first_pen is not None:
+                            pens.append(first_pen)
+                        else:
+                            return pens
+                    pens[-1].end_index = start_fractal.index
+                    pens[-1].end_date = start_fractal.date
+                    continue
+                pens[-1].end_index = end_fractal.index
+                pens[-1].end_date = end_fractal.date
+
+        left += 1
+        right += 1
     
+    print(pens)
+    # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
     return pens
 
 
@@ -180,7 +355,7 @@ def generate_segments(pens: List[Pen]) -> List[Segment]:
     return segments
 
 
-def identify_zhongshus(pens: List[Pen]) -> List[ZhongShu]:
+def identify_zhongshus(pens: List[Pen], level = DAY) -> List[ZhongShu]:
     """
     识别中枢
     简化实现：至少三笔重叠的区域构成中枢
@@ -217,7 +392,7 @@ def identify_zhongshus(pens: List[Pen]) -> List[ZhongShu]:
     return zhongshus
 
 
-def calculate_chan_data(klines: List[KlineData], process_include: bool = True) -> dict:
+def calculate_chan_data(klines: List[KlineData], process_include: bool = True, level = DAY) -> dict:
     """
     计算缠论数据
     
@@ -241,18 +416,26 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True) -
         processed_klines = process_inclusion(klines)
     else:
         processed_klines = klines
-    
+    print(f"processed_klines: \n")
+    for kline in processed_klines:
+        print(kline)
     # 2. 识别分型
-    fractals = identify_fractals(processed_klines)
+    fractals = identify_fractals(processed_klines, klines)
     
     # 3. 生成笔
-    pens = generate_pens(fractals, processed_klines)
+    pens = generate_new_pens(fractals, processed_klines)
+    
+    return{
+        "chan_klines": processed_klines,
+        "fractals": fractals,
+        "pens": pens
+    }
     
     # 4. 生成段
     segments = generate_segments(pens)
     
     # 5. 识别中枢
-    zhongshus = identify_zhongshus(pens)
+    zhongshus = identify_zhongshus(pens, level)
     
     return {
         "fractals": fractals,
