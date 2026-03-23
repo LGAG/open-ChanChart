@@ -8,3 +8,4 @@ pandas
 redis
 pymysql
 dbutils
+baostock==0.8.9
