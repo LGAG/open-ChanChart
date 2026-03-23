@@ -21,14 +21,14 @@ mkdir -p mysql/logs mysql/data
 
 which mysqld
 
-/opt/homebrew/Cellar/mysql/9.6.0_2/bin/mysqld \
+mysqld \
     --defaults-file=$backend_root/conf/my.cnf \
     --datadir=$backend_root/mysql/data \
     --init-file=$backend_root/conf/mysql-init.txt \
     --log-error=$backend_root/mysql/mysql.err \
     --initialize_insecure
 
-/opt/homebrew/Cellar/mysql/9.6.0_2/bin/mysqld \
+mysqld \
     --defaults-file=$backend_root/conf/my.cnf \
     --datadir=$backend_root/mysql/data \
     --init-file=$backend_root/conf/mysql-init.txt \
