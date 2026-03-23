@@ -15,14 +15,14 @@ load_dotenv()
 
 class BaseProcessor(ABC):
     @abstractmethod
-    def get_bar_data(self, code: str, market: str, period: str, start_date: str = None, end_date: str = None):
+    def get_bar_data(self, code: str, market: str, period: str, start_date: str, end_date: str) -> List[KlineData]:
         pass
 
 class StockDataProcessor:
     def __init__(self, sourceProcessor):
         self.sourceProcessor = sourceProcessor
 
-    def get_kline_data(self, code: str, market: str, period: str, start_date: str = None, end_date: str = None) -> List[KlineData]:
+    def get_kline_data(self, code: str, market: str, period: str, start_date: str, end_date: str) -> List[KlineData]:
         return self.sourceProcessor.get_bar_data(code, market, period, start_date, end_date)
         
 
