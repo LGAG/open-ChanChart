@@ -317,40 +317,69 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
     return pens
 
 
-def generate_segments(pens: List[Pen]) -> List[Segment]:
+def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[Segment]:
     """
     生成段
-    简化实现：连续的同向笔可以合并成段
+    简化实现：如果发现了更高（低）的高点和更高（低）的低点，那么就认为向上（下）线段延伸，否则，就认为线段结束
     """
     if len(pens) < 3:
         return []
     
     segments = []
-    segment_pens = [pens[0]]
-    segment_start_idx = 0
-    
-    for i in range(1, len(pens)):
-        if pens[i].direction == segment_pens[-1].direction:
-            segment_pens.append(pens[i])
-        else:
-            if len(segment_pens) >= 3:
+    current_idx = 0
+
+    # 首先寻找第一个线段
+    for i in range(current_idx, len(pens) - 2):
+        if pens[i].direction == 'up' and klines[pens[i+2].start_index].low >= klines[pens[i].start_index].low and klines[pens[i+2].end_index].high >= klines[pens[i].end_index].high:
+            current_idx = i + 3
+            segments.append(Segment(
+                start_index=i,
+                end_index=i+2,
+                top=klines[pens[i+2].end_index].high,
+                bottom=klines[pens[2].start_index].low,
+                direction='up'
+            ))
+            break
+        elif pens[i].direction == 'down' and klines[pens[i+2].start_index].low <= klines[pens[i].start_index].low and klines[pens[i+2].end_index].high <= klines[pens[i].end_index].high:
+            current_idx = i + 3
+            segments.append(Segment(
+                start_index=i,
+                end_index=i+2,
+                top=klines[pens[i].start_index].high,
+                bottom=klines[pens[i+2].end_index].low,
+                direction='up'
+            ))
+            break
+    if len(segments) == 0:
+        print("warning: 没有找到第一个线段")
+        return segments
+
+    # 然后寻找后续的线段
+    while current_idx < len(pens) - 2:
+        if segments[-1].direction == 'up':
+            if klines[pens[current_idx+2].start_index].low <= klines[pens[current_idx].start_index].low and klines[pens[current_idx+2].end_index].high <= klines[pens[current_idx].end_index].high:
                 segments.append(Segment(
-                    start_index=segment_start_idx,
-                    end_index=segment_start_idx + len(segment_pens) - 1,
-                    pens=segment_pens,
-                    direction=segment_pens[0].direction
+                    start_index=current_idx,
+                    end_index=current_idx+2,
+                    top=klines[pens[current_idx].start_index].high,
+                    bottom=klines[pens[current_idx+2].end_index].low,
+                    direction='down'
                 ))
-            segment_start_idx = i
-            segment_pens = [pens[i]]
-    
-    # 处理最后一段
-    if len(segment_pens) >= 3:
-        segments.append(Segment(
-            start_index=segment_start_idx,
-            end_index=segment_start_idx + len(segment_pens) - 1,
-            pens=segment_pens,
-            direction=segment_pens[0].direction
-        ))
+                current_idx += 3
+                continue
+        if segments[-1].direction == 'down':
+            if klines[pens[current_idx+2].start_index].low >= klines[pens[current_idx].start_index].low and klines[pens[current_idx+2].end_index].high >= klines[pens[current_idx].end_index].high:
+                segments.append(Segment(
+                    start_index=current_idx,
+                    end_index=current_idx+2,
+                    top=klines[pens[current_idx+2].end_index].high,
+                    bottom=klines[pens[current_idx].start_index].low,
+                    direction='up'
+                ))
+                current_idx += 3
+                continue
+        segments[-1].end_index = current_idx + 2
+        current_idx += 2
     
     return segments
 

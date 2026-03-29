@@ -21,8 +21,8 @@ class Fractal(BaseModel):
 
 class Pen(BaseModel):
     """笔数据模型"""
-    start_index: int = Field(..., description="起始K线索引")
-    end_index: int = Field(..., description="结束K线索引")
+    start_index: int = Field(..., description="起始缠论K线索引")
+    end_index: int = Field(..., description="结束缠论K线索引")
     start_date: str = Field(..., description="起始日期")
     end_date: str = Field(..., description="结束日期")
     direction: str = Field(..., description="方向 up/down")
@@ -32,7 +32,8 @@ class Segment(BaseModel):
     """线段数据模型"""
     start_index: int = Field(..., description="起始笔索引")
     end_index: int = Field(..., description="结束笔索引")
-    pens: List[Pen] = Field(..., description="包含的笔列表")
+    top: float = Field(..., description="线段高点")
+    bottom: float = Field(..., description="线段低点")
     direction: str = Field(..., description="方向 up/down")
 
 
