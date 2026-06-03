@@ -2,158 +2,251 @@
 
 [![Demo Status](https://img.shields.io/badge/demo-working-brightgreen.svg)](https://github.com/LGAG/open-ChanChart)
 
-## 🎉 Demo Available!
+## 项目简介
 
-A working prototype is now available! See [SETUP.md](SETUP.md) for installation and usage instructions.
+ChanChart 是一个基于缠论（缠中说禅理论）的股票K线图表可视化系统，支持K线展示、顶底分型识别、笔生成、段划分和中枢识别等缠论核心结构的可视化。
 
-### Demo Screenshots
+![主界面](https://github.com/user-attachments/assets/74e2a9c8-7a79-4230-83da-2a3ec5243f7d)
+![缠论可视化](https://github.com/user-attachments/assets/498a3acd-32b0-4cb1-9729-a28d742203a1)
 
-**Main Interface:**
-![Initial View](https://github.com/user-attachments/assets/74e2a9c8-7a79-4230-83da-2a3ec5243f7d)
+## 快速开始
 
-**Chan Theory Visualization:**
-![Chart with Data](https://github.com/user-attachments/assets/498a3acd-32b0-4cb1-9729-a28d742203a1)
-
-### Quick Start
+详细安装说明请参考 [SETUP.md](SETUP.md)。
 
 ```bash
-# Start backend
+# 1. 启动中间件（MySQL）
 cd backend
-pip install -r requirements.txt
-python run.py
+docker-compose up -d
 
-# Start frontend (in another terminal)
+# 2. 安装 Redis（如未安装）
+# macOS: brew install redis && brew services start redis
+# Ubuntu: sudo apt install redis-server && sudo systemctl start redis
+
+# 3. 配置后端
+cd backend
+cp .env.example .env          # 编辑 API 配置
+cp app/config/config.yaml.example app/config/config.yaml  # 编辑数据库/Redis 配置
+pip install -r requirements.txt
+python run.py                  # 启动后端（自动初始化数据库表）
+
+# 4. 启动前端（另一个终端）
 cd frontend
 npm install
 npm run dev
 ```
 
-Then open http://localhost:5173 in your browser.
+打开 http://localhost:5173 访问应用。
 
-## 一、项目核心需求
-实现股票K线与缠论核心结构（笔、段、中枢）的可视化展示，支持股票选择、周期切换、缠论参数配置，提供清晰的缠论结构数据查询接口。
+## 技术框架
 
-## 二、技术框架
-### 2.1 前端技术框架
-Vue3 + Vite + Element Plus + ECharts
+### 前端
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Vue 3 | 3.5.25 | UI 框架 |
+| Vite | 7.3.1 | 构建工具 |
+| Element Plus | 2.13.2 | UI 组件库 |
+| ECharts | 6.0.0 | 图表库 |
+| Axios | 1.13.5 | HTTP 客户端 |
 
-### 2.2 后端技术框架
-Python + FastAPI + Uvicorn + MySQL + Redis
+### 后端
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Python | 3.8+ | 核心语言 |
+| FastAPI | 0.115.0 | Web 框架 |
+| Uvicorn | 0.34.0 | ASGI 服务器 |
+| Pydantic | 2.10.5 | 数据校验 |
+| Pandas | 2.2.3 | 数据处理 |
+| baostock | 0.8.9 | K线数据源 + 股票列表 |
+| PyMySQL | 1.1.2 | MySQL 驱动 |
+| DBUtils | 3.1.2 | 数据库连接池 |
+| SQLAlchemy | - | ORM/数据操作 |
+| Redis | 7.x | 数据缓存 |
+| PyYAML | - | 配置文件解析 |
 
-## 三、功能需求
-### 3.1 前端功能需求
-- K线图表绘制：支持日K、30F、5F等周期K线展示
+### 中间件
+| 技术 | 用途 |
+|------|------|
+| MySQL 8.0 | 数据持久化（K线数据、股票信息） |
+| Redis 7.0+ | 缓存（K线数据、搜索结果） |
 
-- 缠论结构可视化：叠加展示缠论笔（红/绿线段）、段（粗线）、中枢（矩形框）
+## 功能需求
 
-- 股票选择功能：支持股票代码/名称模糊搜索、沪深A股切换，记忆最近选择股票
+### 前端功能
+- **K线图表绘制**：支持日K、1小时、30分钟等周期K线展示
+- **缠论结构可视化**：叠加展示缠论笔（蓝色线段）、顶底分型（红/绿三角标记）
+- **股票选择功能**：支持股票代码/名称模糊搜索
+- **缠论参数配置**：可配置是否处理包含关系
+- **交互功能**：鼠标滚轮缩放K线、悬停显示详情、周期切换、数据刷新
+- **时间范围选择**：支持自定义日期范围查询
+- **缠论数据统计**：展示分型、笔、段、中枢数量
 
-- 缠论参数配置：可配置顶底分型确认K线数、中枢级别、是否显示包含关系处理
+### 后端功能
+- **行情数据接口**：通过 baostock 获取股票K线数据，自动写入 MySQL 持久化
+- **缠论算法实现**：顶底分型识别（处理包含关系）、笔生成（含缺口笔判断）、段生成、中枢识别
+- **缠论数据接口**：返回股票对应周期的缠论笔、分型数据
+- **股票搜索接口**：基于 MySQL 数据库的模糊搜索，支持按市场过滤
+- **数据缓存**：通过 Redis 缓存高频查询的K线数据（默认2小时过期）
+- **异常处理**：统一捕获算法计算、接口请求异常
 
-- 交互功能：鼠标滚轮缩放K线、悬停显示缠论结构详情、周期切换、数据刷新
+## 项目结构
 
-- 接口对接：封装后端API请求，处理请求/响应、异常提示
-
-- 全局状态管理：存储选中股票、周期、缠论参数等全局状态
-
-### 4.1 后端功能需求
-- 行情数据接口：接收前端请求，从Tushare/Akshare获取股票K线数据，缓存至Redis
-
-- 缠论算法实现：顶底分型识别（处理包含关系）、笔生成、段生成、中枢识别
-
-- 缠论数据接口：接收前端请求，返回股票对应周期的缠论笔、段、中枢数据
-
-- 股票搜索接口：支持股票名称/代码模糊搜索，返回匹配股票列表
-
-- 数据校验：校验行情数据完整性（缺失K线、价格异常），返回标准化格式数据
-
-- 缓存管理：缓存高频查询的K线、缠论数据（1小时过期），减少数据源调用
-
-- 异常处理：统一捕获算法计算、接口请求异常，返回标准化错误信息
-
-- 数据操作：MySQL存储股票基础信息、历史K线数据，提供增删改查操作
-
-## 四、项目结构
-### 4.1 前端项目结构
-```text
+### 前端
+```
 frontend/
 ├── src/
-│   ├── api/                # 接口封装（对接后端API）
-│   │   ├── stock.js        # 股票行情相关接口
-│   │   └── chan.js         # 缠论数据相关接口
-│   ├── components/         # 通用组件
-│   │   ├── KlineChart.vue  # K线+缠论图表核心组件
-│   │   ├── StockSelector.vue  # 股票选择组件
-│   │   └── ChanParams.vue    # 缠论参数配置组件
-│   ├── store/              # Pinia状态管理（全局状态存储）
-│   ├── utils/              # 工具函数（请求、格式化等）
-│   ├── views/              # 页面视图
-│   │   ├── Home.vue        # 首页（核心图表展示）
-│   │   └── History.vue     # 历史数据查看页
-│   ├── App.vue             # 根组件
-│   └── main.js             # 前端入口文件
-├── .env.development        # 开发环境配置
-├── package.json            # 前端依赖清单
-└── vite.config.js          # Vite配置文件
+│   ├── api/                    # 接口封装
+│   │   ├── request.js          # Axios 实例与拦截器
+│   │   ├── stock.js            # 股票搜索、K线接口
+│   │   └── chan.js             # 缠论分析接口
+│   ├── components/             # 组件
+│   │   ├── KlineChart.vue      # K线+缠论图表核心组件
+│   │   └── StockSelector.vue   # 股票选择组件
+│   ├── views/
+│   │   └── Home.vue            # 首页（核心图表展示）
+│   ├── App.vue                 # 根组件
+│   ├── main.js                 # 入口文件
+│   └── style.css               # 全局样式
+├── .env.development            # 开发环境配置
+├── package.json
+├── pnpm-lock.yaml
+└── vite.config.js
 ```
 
-### 4.2 后端项目结构
-```text
+### 后端
+```
 backend/
 ├── app/
-│   ├── api/                   # 路由层
-│   │   ├── route.py           # 路由接口
-│   │   ├── stock.py           # 股票行情接口
-│   │   └── chan.py            # 缠论数据接口
-│   ├── core/                  # 核心逻辑
-│   │   ├── chan_algorithm.py  # 缠论核心算法实现
-│   │   └── data_processor.py  # 行情数据处理与校验
-│   ├── service/               # 服务层
-│   │   ├── stock_service.py   # MySQL数据增删改查
-│   │   └── cache_service.py   # Redis缓存操作
-│   ├── models/                # 数据模型（Pydantic校验）
-│   │   ├── stock_model.py     # K线数据模型
-│   │   └── chan_model.py      # 缠论数据模型
-│   ├── utils/                 # 后端工具函数
-│   └── main.py                # 后端入口文件
-├── .env                       # 后端环境变量（数据源Token、缓存配置等）
-├── requirements.txt           # 后端依赖清单
-└── run.py                     # 后端启动脚本
+│   ├── api/                    # 路由层
+│   │   ├── stock.py            # 股票搜索、K线接口
+│   │   └── chan.py             # 缠论分析接口
+│   ├── config/                 # 配置
+│   │   ├── config.py           # 配置加载（YAML）
+│   │   └── config.yaml         # 数据库/Redis 配置
+│   ├── core/                   # 核心算法
+│   │   └── chan_algorithm.py   # 缠论算法实现
+│   ├── models/                 # 数据模型
+│   │   ├── stock_model.py      # K线、股票信息模型
+│   │   └── chan_model.py       # 缠论数据模型
+│   ├── service/                # 服务层
+│   │   └── stock.py            # Baostock 数据源 + MySQL 操作
+│   ├── utils/                  # 工具
+│   │   ├── middleware.py       # Redis/MySQL 单例客户端
+│   │   └── redis.py            # Redis 缓存操作
+│   └── main.py                 # FastAPI 应用
+├── docker-compose.yml          # MySQL 容器配置
+├── .env.example                # 环境变量示例
+├── requirements.txt            # Python 依赖
+└── run.py                      # 启动脚本（含数据库初始化）
 ```
 
-## 五、API接口
+## API 接口
 
-### 5.1 股票搜索接口
-- 请求方式： GET
-- 接口路径： /api/stock/search
-- 请求参数：
-  - `keyword`：股票名称或代码（必填）
-  - `market`：市场类型（可选，默认为`sh`，可选值为`sh`、`sz`）
-- 响应示例：
+### 1. 股票搜索
+- **请求方式**: GET
+- **接口路径**: `/api/stock/search`
+- **请求参数**:
+  - `keyword`（必填）：股票名称或代码
+  - `market`（可选）：市场类型，`sh` 或 `sz`
+- **响应示例**:
 ```json
 {
   "code": 200,
   "message": "Success",
   "data": [
-    {
-      "code": "000001",
-      "name": "平安银行",
-      "market": "sz"
-    }
+    { "code": "000001", "name": "平安银行", "market": "sz" }
   ]
 }
 ```
 
-### 5.2 股票K线数据接口
-- 请求方式： GET
-- 接口路径： /api/chan/kline
-- 请求参数：
-  - `code`：股票代码（必填）
-  - `market`：市场类型（可选，默认为`sh`，可选值为`sh`、`sz`）
-  - `period`：周期（可选，默认为`D`，可选值为`D`、`30F`、`5F`）
-  - `start_date`：开始日期（可选，格式为`YYYY-MM-DD`）
-  - `end_date`：结束日期（可选，格式为`YYYY-MM-DD`）
-- 响应示例：
+### 2. 股票列表
+- **请求方式**: POST
+- **接口路径**: `/api/stock/list`
+- **请求参数**: 可选 JSON body
+- **响应示例**:
 ```json
-还没想好
+{
+  "code": 200,
+  "message": "Success",
+  "data": [
+    { "code": "000001", "name": "平安银行", "market": "sz" }
+  ]
+}
 ```
+
+### 3. K线数据
+- **请求方式**: GET
+- **接口路径**: `/api/stock/kline`
+- **请求参数**:
+  - `code`（必填）：股票代码
+  - `market`（可选，默认 `sh`）：市场类型
+  - `period`（可选，默认 `daily`）：周期，可选 `daily`、`60F`、`30F`
+  - `start_date`（可选，格式 `YYYY-MM-DD`）：开始日期
+  - `end_date`（可选，格式 `YYYY-MM-DD`）：结束日期
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "message": "Success",
+  "data": {
+    "code": "600519",
+    "market": "sh",
+    "period": "daily",
+    "klines": [
+      {
+        "date": "2025-01-02",
+        "open": 1480.0,
+        "high": 1500.0,
+        "low": 1475.0,
+        "close": 1495.0,
+        "volume": 12345,
+        "period": "day",
+        "level": 6,
+        "code": "600519"
+      }
+    ]
+  }
+}
+```
+
+### 4. 缠论分析
+- **请求方式**: GET
+- **接口路径**: `/api/chan/analysis`
+- **请求参数**:
+  - `code`（必填）：股票代码
+  - `market`（可选，默认 `sh`）：市场类型
+  - `period`（可选，默认 `D`）：周期，可选 `D`、`60F`、`30F`
+  - `process_include`（可选，默认 `true`）：是否处理包含关系
+  - `start_date`（可选，格式 `YYYY-MM-DD`）：开始日期
+  - `end_date`（可选，格式 `YYYY-MM-DD`）：结束日期
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "message": "Success",
+  "data": {
+    "code": "600519",
+    "market": "sh",
+    "period": "D",
+    "klines": [ ... ],
+    "chan": {
+      "chan_klines": [ ... ],
+      "fractals": [
+        { "index": 5, "k_index": 5, "date": "2025-01-08", "type": "top" }
+      ],
+      "pens": [
+        { "start_index": 3, "end_index": 8, "start_date": "2025-01-06", "end_date": "2025-01-13", "direction": "up" }
+      ]
+    }
+  }
+}
+```
+
+> **注意**：段（segments）和中枢（zhongshus）数据当前未在 API 响应中返回，算法已实现但尚未启用。
+
+## 已知问题
+
+详见 [CODE_REVIEW.md](CODE_REVIEW.md)，主要包括：
+- 缠论段和中枢计算结果未在 API 中返回
+- 前端分型标记因缺少 `price` 字段无法正确显示
+- 30分钟K线时间计算有误
+- 部分代码存在 SQL 注入风险和线程安全问题

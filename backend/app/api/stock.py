@@ -2,28 +2,11 @@
 from fastapi import APIRouter, Query, Body
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
-import akshare as ak
-import random
-from app.service.akshare_service import stock_processor
 from app.service.stock import get_stock_data_daily_bao, query_stock, get_stock_data_bao
 from app.models.stock_model import StockListResponse
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
 
-
-# 模拟股票数据库
-MOCK_STOCKS = [
-    {"code": "000001", "name": "平安银行", "market": "sz"},
-    {"code": "000002", "name": "万科A", "market": "sz"},
-    {"code": "600000", "name": "浦发银行", "market": "sh"},
-    {"code": "600036", "name": "招商银行", "market": "sh"},
-    {"code": "600519", "name": "贵州茅台", "market": "sh"},
-    {"code": "000858", "name": "五粮液", "market": "sz"},
-    {"code": "300927", "name": "江天化学", "market": "sz"},
-    {"code": "601211", "name": "国泰海通", "market": "sh"},
-    {"code": "600795", "name": "国电电力", "market": "sh"},
-    {"code": "600886", "name": "国投电力", "market": "sh"},
-]
 
 LIST_STOCKS = [
 

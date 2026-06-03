@@ -2,8 +2,6 @@ fastapi==0.115.0
 uvicorn[standard]==0.34.0
 pydantic==2.10.5
 python-dotenv==1.0.0
-akshare==1.13.16
-tushare==1.4.24
 pandas==2.2.3
 redis>=7.0.0,<8.0.0
 PyMySQL==1.1.2

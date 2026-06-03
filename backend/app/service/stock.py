@@ -1,4 +1,3 @@
-import akshare as ak
 import baostock as bs
 import pandas as pd
 from datetime import datetime, timedelta
@@ -18,21 +17,6 @@ def parse_time_to_minute(time_str: str) -> pd.Timestamp:
         return pd.Timestamp(dt_minute)
     except (ValueError, TypeError):
         return pd.NaT
-
-def get_stock_data_daily_sina(code: str, market: str, period: str, start_timestamp: str = None, end_timestamp: str = None):
-    try:
-        df = ak.stock_zh_a_daily(symbol=code, adjust="qfq", start_date=start_timestamp, end_date=end_timestamp)
-        df.to_sql(
-            name="daily",
-            con=Mysql_client.get_engine(),
-            if_exists="append",
-            index=False,
-            chunksize=1000
-        )
-        return True
-    except Exception as e:
-        print(e)
-        return False
 
 def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str = None, end_timestamp: str = None):
     try:
