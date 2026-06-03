@@ -72,7 +72,7 @@ npm run dev
 ## 功能需求
 
 ### 前端功能
-- **K线图表绘制**：支持日K、1小时、30分钟等周期K线展示
+- **K线图表绘制**：支持日K、1小时、30分钟、5分钟、周K、月K、年K等周期K线展示
 - **缠论结构可视化**：叠加展示缠论笔（蓝色线段）、顶底分型（红/绿三角标记）
 - **股票选择功能**：支持股票代码/名称模糊搜索
 - **缠论参数配置**：可配置是否处理包含关系
@@ -82,6 +82,7 @@ npm run dev
 
 ### 后端功能
 - **行情数据接口**：通过 baostock 获取股票K线数据，自动写入 MySQL 持久化
+- **批量数据更新**：支持按股票代码、周期列表、日期范围组合条件批量更新K线数据
 - **缠论算法实现**：顶底分型识别（处理包含关系）、笔生成（含缺口笔判断）、段生成、中枢识别
 - **缠论数据接口**：返回股票对应周期的缠论笔、分型数据
 - **股票搜索接口**：基于 MySQL 数据库的模糊搜索，支持按市场过滤
@@ -117,7 +118,7 @@ frontend/
 backend/
 ├── app/
 │   ├── api/                    # 路由层
-│   │   ├── stock.py            # 股票搜索、K线接口
+│   │   ├── stock.py            # 股票搜索、K线、数据更新接口
 │   │   └── chan.py             # 缠论分析接口
 │   ├── config/                 # 配置
 │   │   ├── config.py           # 配置加载（YAML）
@@ -125,12 +126,14 @@ backend/
 │   ├── core/                   # 核心算法
 │   │   └── chan_algorithm.py   # 缠论算法实现
 │   ├── models/                 # 数据模型
-│   │   ├── stock_model.py      # K线、股票信息模型
+│   │   ├── db_model.py         # SQLAlchemy ORM 模型（Stock、DayKline 等）
+│   │   ├── stock_model.py      # Pydantic 响应模型
 │   │   └── chan_model.py       # 缠论数据模型
 │   ├── service/                # 服务层
 │   │   └── stock.py            # Baostock 数据源 + MySQL 操作
 │   ├── utils/                  # 工具
-│   │   ├── middleware.py       # Redis/MySQL 单例客户端
+│   │   ├── database.py         # SQLAlchemy 引擎 + Session 管理
+│   │   ├── middleware.py       # Redis 单例客户端
 │   │   └── redis.py            # Redis 缓存操作
 │   └── main.py                 # FastAPI 应用
 ├── docker-compose.yml          # MySQL 容器配置
@@ -208,7 +211,32 @@ backend/
 }
 ```
 
-### 4. 缠论分析
+### 4. 数据更新
+- **请求方式**: POST
+- **接口路径**: `/api/stock/update`
+- **请求参数**:
+  - `code`（可选）：股票代码，不填则更新所有股票
+  - `market`（可选，默认 `sh`）：市场类型
+  - `periods`（可选）：周期列表，逗号分隔，如 `day,60F,30F,5F,week,month,year`，不填则更新所有周期
+  - `start_date`（可选，格式 `YYYY-MM-DD`）：开始日期，不填则默认一年前
+  - `end_date`（可选，格式 `YYYY-MM-DD`）：结束日期，不填则默认今天
+- **支持的周期值**: `day`(日K)、`60F`(1小时)、`30F`(30分钟)、`5F`(5分钟)、`week`(周K)、`month`(月K)、`year`(年K)
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "message": "Success",
+  "data": {
+    "sh.600519": {
+      "日K": "成功(245条)",
+      "60分K": "成功(980条)",
+      "30分K": "成功(1960条)"
+    }
+  }
+}
+```
+
+### 5. 缠论分析
 - **请求方式**: GET
 - **接口路径**: `/api/chan/analysis`
 - **请求参数**:

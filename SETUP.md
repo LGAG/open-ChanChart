@@ -136,6 +136,7 @@ VITE_API_BASE_URL=http://localhost:8000
 
 ### 后端功能
 - **K线数据获取**：通过 baostock 获取真实A股行情数据，自动持久化到 MySQL
+- **批量数据更新**：支持按股票代码、周期列表、日期范围组合条件批量更新K线数据
 - **股票搜索**：基于 MySQL 数据库的模糊搜索，支持代码/名称匹配
 - **缠论算法**：
   - 包含关系处理
@@ -172,6 +173,14 @@ POST /api/stock/list
 GET /api/stock/kline?code={code}&market={market}&period={period}&start_date={date}&end_date={date}
 ```
 
+### 数据更新
+```
+POST /api/stock/update?code={code}&market={market}&periods={periods}&start_date={date}&end_date={date}
+```
+- `code`：可选，不填则更新所有股票
+- `periods`：可选，逗号分隔的周期列表（day,60F,30F,5F,week,month,year），不填则更新所有周期
+- `start_date`/`end_date`：可选日期范围
+
 ### 缠论分析
 ```
 GET /api/chan/analysis?code={code}&market={market}&period={period}&process_include={bool}&start_date={date}&end_date={date}
@@ -192,7 +201,7 @@ GET /api/chan/analysis?code={code}&market={market}&period={period}&process_inclu
 
 ### 后端
 - **FastAPI**：Web 框架
-- **baostock**：K线数据源（日线、60分钟、30分钟）+ 股票列表
+- **baostock**：K线数据源（日线、60分钟、30分钟、5分钟、周线、月线、年线）+ 股票列表
 - **MySQL**：数据持久化（SQLAlchemy + PyMySQL + DBUtils 连接池）
 - **Redis**：数据缓存
 - **Pydantic**：数据校验

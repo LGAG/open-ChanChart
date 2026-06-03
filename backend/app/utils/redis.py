@@ -1,5 +1,5 @@
 import json
-from app.utils.middleware import RedisClient, MysqlClient
+from app.utils.middleware import RedisClient
 from app.config.config import REDIS_EXPIRE
 
 def get_cache(cache_key):

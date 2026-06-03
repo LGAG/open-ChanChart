@@ -20,12 +20,14 @@ backend/
 │   ├── core/                   # 缠论核心算法
 │   │   └── chan_algorithm.py   # 包含关系处理、分型识别、笔生成、段生成、中枢识别
 │   ├── models/                 # 数据模型
-│   │   ├── stock_model.py      # KlineData、StockInfo、StockListResponse
+│   │   ├── db_model.py         # SQLAlchemy ORM 模型（Stock、DayKline、HourKline 等）
+│   │   ├── stock_model.py      # Pydantic 响应模型（KlineData、StockInfo）
 │   │   └── chan_model.py       # ClassicChanKline、Fractal、Pen、Segment、ZhongShu
 │   ├── service/                # 服务层
-│   │   └── stock.py            # Baostock 数据源 + MySQL 持久化 + 股票列表更新
+│   │   └── stock.py            # Baostock 数据源 + MySQL ORM 操作 + 批量数据更新
 │   ├── utils/                  # 工具
-│   │   ├── middleware.py       # RedisClient/MysqlClient 单例（连接池）
+│   │   ├── database.py         # SQLAlchemy 引擎 + Session 管理
+│   │   ├── middleware.py       # RedisClient 单例
 │   │   └── redis.py            # 缓存读写封装
 │   └── main.py                 # FastAPI 应用入口
 ├── docker-compose.yml          # MySQL 8.0 容器
@@ -97,6 +99,7 @@ frontend/
 | GET | `/api/stock/search` | 股票模糊搜索（keyword, market） |
 | POST | `/api/stock/list` | 获取完整股票列表 |
 | GET | `/api/stock/kline` | K线数据（code, market, period, start_date, end_date） |
+| POST | `/api/stock/update` | 批量更新K线数据（code, market, periods, start_date, end_date） |
 | GET | `/api/chan/analysis` | 缠论分析（code, market, period, process_include, start_date, end_date） |
 | GET | `/health` | 健康检查 |
 | GET | `/` | API 信息 |
@@ -127,7 +130,8 @@ frontend/
 ## 当前状态
 
 ### 已实现
-- K线数据获取与持久化（baostock → MySQL）
+- K线数据获取与持久化（baostock → MySQL，通过 SQLAlchemy ORM）
+- 批量数据更新接口（支持按股票/周期/日期范围组合条件）
 - 包含关系处理
 - 顶底分型识别
 - 笔生成（含缺口笔处理）
@@ -135,7 +139,7 @@ frontend/
 - Redis 缓存
 - 前端交互式K线图
 - 前端笔线段可视化
-- 日K/1小时/30分钟周期支持
+- 日K/1小时/30分钟/5分钟/周K/月K/年K周期支持
 
 ### 已实现但未启用
 - 段生成算法（`generate_segments`）：代码存在于 `chan_algorithm.py`，但在 `calculate_chan_data()` 中因提前 return 而不会执行

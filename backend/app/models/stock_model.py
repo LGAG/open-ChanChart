@@ -1,9 +1,11 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional
 
 
 class KlineData(BaseModel):
     """K线数据模型"""
+    model_config = ConfigDict(from_attributes=True)
+
     period: str = Field(..., description="周期")
     level: int = Field(..., description="级别")
     date: str = Field(..., description="日期")
@@ -21,6 +23,8 @@ class KlineData(BaseModel):
 
 class StockInfo(BaseModel):
     """股票信息模型"""
+    model_config = ConfigDict(from_attributes=True)
+
     code: str = Field(..., description="股票代码")
     name: str = Field(..., description="股票名称")
     market: str = Field(..., description="市场类型 sh/sz")
