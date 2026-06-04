@@ -28,3 +28,6 @@ MYSQL_PORT = _mysql_cfg.get("port", 3306)
 MYSQL_USER = _mysql_cfg.get("user", "root")
 MYSQL_PASSWORD = _mysql_cfg.get("password", "root")
 MYSQL_DATABASE = _mysql_cfg.get("database", "chan")
+
+_period_map_cfg = _cfg.get("period_map", {}) if isinstance(_cfg, dict) else {}
+PERIOD_MAP: dict[str, str] = {str(k): str(v) for k, v in _period_map_cfg.items()}

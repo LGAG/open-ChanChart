@@ -10,3 +10,32 @@ mysql:
   user: root
   password: root
   database: chan
+
+# 周期映射：将前端/API传入的不规范周期名称映射为baostock所需的频率值
+# baostock支持的频率值：d=日K, w=周K, m=月K, 5=5分钟, 15=15分钟, 30=30分钟, 60=60分钟
+period_map:
+  # 日K
+  day: d
+  daily: d
+  d: d
+  # 60分钟K
+  60f: "60"
+  "60": "60"
+  hour: "60"
+  # 30分钟K
+  30f: "30"
+  "30": "30"
+  half: "30"
+  # 15分钟K
+  15f: "15"
+  "15": "15"
+  # 5分钟K
+  5f: "5"
+  "5": "5"
+  five_min: "5"
+  # 周K
+  week: w
+  w: w
+  # 月K
+  month: m
+  m: m

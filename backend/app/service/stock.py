@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from app.utils.database import engine, get_session
 from app.models.db_model import Stock, DayKline, WeekKline, MonthKline, YearKline, get_kline_model
+from app.config.config import PERIOD_MAP
 
 
 def parse_time_to_minute(time_str: str) -> pd.Timestamp:
@@ -37,11 +38,16 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
         lg = bs.login()
         print('login respond error_code:' + lg.error_code)
         print('login respond  error_msg:' + lg.error_msg)
-        if period == "daily" or period == "day" or period == "d":
-            period = "d"
-            start = datetime.strptime(start_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            rs = bs.query_history_k_data_plus(f"{market}.{code}", "date,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="3")
+        table_key = None
+        df = None
+        normalized = PERIOD_MAP.get(period.lower(), period)
+        start = datetime.strptime(start_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
+        end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
+
+        if normalized == "d":
+            rs = bs.query_history_k_data_plus(f"{market}.{code}", "date,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=normalized, adjustflag="3")
+            if rs is None:
+                return False
             print('query_history_k_data_plus respond error_code:' + rs.error_code)
             print('query_history_k_data_plus respond  error_msg:' + rs.error_msg)
             df = rs.get_data()
@@ -59,47 +65,29 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
             df = df.drop(columns=['code'])
             df.rename(columns={'new_code': 'code'}, inplace=True)
             table_key = 'day'
-        elif period == "60F":
-            period = "60"
-            start = datetime.strptime(start_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            rs = bs.query_history_k_data_plus(f"{market}.{code}", "time,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="3")
+        elif normalized in ("60", "30"):
+            rs = bs.query_history_k_data_plus(f"{market}.{code}", "time,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=normalized, adjustflag="3")
+            if rs is None:
+                return False
             print('query_history_k_data_plus respond error_code:' + rs.error_code)
             print('query_history_k_data_plus respond  error_msg:' + rs.error_msg)
             df = rs.get_data()
 
-            df['period'] = 'hour'
+            timedelta_val = timedelta(hours=1) if normalized == "60" else timedelta(minutes=30)
+            period_label = 'hour' if normalized == "60" else 'half'
+            df['period'] = period_label
             df['level'] = 5
             df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
             df['market'] = df['market'].str.lower()
             df['end_time'] = df['time'].apply(parse_time_to_minute)
-            df["start_time"] = df["end_time"] - timedelta(hours=1)
+            df["start_time"] = df["end_time"] - timedelta_val
             df['start_time'] = df['start_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
             df['end_time'] = df['end_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
             df = df.drop(columns=['code', 'time'])
             df.rename(columns={'new_code': 'code'}, inplace=True)
-            table_key = 'hour'
-        elif period == "30F":
-            period = "30"
-            start = datetime.strptime(start_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
-            rs = bs.query_history_k_data_plus(f"{market}.{code}", "time,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="3")
-            print('query_history_k_data_plus respond error_code:' + rs.error_code)
-            print('query_history_k_data_plus respond  error_msg:' + rs.error_msg)
-            df = rs.get_data()
-
-            df['period'] = 'hour'
-            df['level'] = 5
-            df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
-            df['market'] = df['market'].str.lower()
-            df['end_time'] = df['time'].apply(parse_time_to_minute)
-            df["start_time"] = df["end_time"] - timedelta(minutes=30)
-            df['start_time'] = df['start_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
-            df['end_time'] = df['end_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
-            df = df.drop(columns=['code', 'time'])
-            df.rename(columns={'new_code': 'code'}, inplace=True)
-            table_key = 'half'
-
+            table_key = period_label
+        if table_key is None or df is None:
+            return False
         model_class = get_kline_model(table_key)
         if model_class is None:
             raise ValueError(f"不支持的周期: {table_key}")
@@ -113,7 +101,7 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
         bs.logout()
 
 
-def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestamp: str = None, end_timestamp: str = None):
+def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestamp: str, end_timestamp: str):
     try:
         lg = bs.login()
         print('login respond error_code:' + lg.error_code)
@@ -122,6 +110,8 @@ def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestam
         end = datetime.strptime(end_timestamp, "%Y-%m-%d").strftime("%Y-%m-%d")
         print(start, end, period)
         rs = bs.query_history_k_data_plus(f"{market}.{code}", "date,code,open,high,low,close,volume", start_date=start, end_date=end, frequency=period, adjustflag="1")
+        if rs is None:
+            return False
         print('query_history_k_data_plus respond error_code:' + rs.error_code)
         print('query_history_k_data_plus respond  error_msg:' + rs.error_msg)
         df = rs.get_data()
@@ -181,16 +171,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
     """
     ALL_PERIODS = ["d", "60", "30", "5", "w", "m", "y"]
     PERIOD_DISPLAY = {"d": "日K", "60": "60分K", "30": "30分K", "5": "5分K", "w": "周K", "m": "月K", "y": "年K"}
-    # 前端/API 传入的周期值 → baostock 周期值
-    PERIOD_NORMALIZE = {
-        "day": "d", "daily": "d", "d": "d",
-        "60f": "60", "60": "60", "hour": "60",
-        "30f": "30", "30": "30", "half": "30",
-        "5f": "5", "5": "5", "five_min": "5",
-        "week": "w", "w": "w",
-        "month": "m", "m": "m",
-        "year": "y", "y": "y",
-    }
+    PERIOD_NORMALIZE = PERIOD_MAP
 
     if periods is None:
         periods = ALL_PERIODS
@@ -228,6 +209,9 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
                         start_date=start_date, end_date=end_date,
                         frequency="d", adjustflag="3"
                     )
+                    if rs is None:
+                        stock_results[display_name] = "查询失败"
+                        continue
                     df = rs.get_data()
                     if df.empty:
                         stock_results[display_name] = "无数据"
@@ -349,7 +333,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
     return results
 
 
-def query_stocks() -> list[dict]:
+def query_stocks_list() -> list[dict]:
     """查询全部股票列表"""
     with get_session() as session:
         stocks = session.query(Stock).all()

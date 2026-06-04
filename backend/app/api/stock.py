@@ -1,7 +1,7 @@
 """股票数据API接口"""
 from fastapi import APIRouter, Query, Body
 from typing import Optional, Dict, Any, List
-from app.service.stock import get_stock_data_bao, query_stocks, search_stocks, update_kline_data
+from app.service.stock import get_stock_data_bao, query_stocks_list, search_stocks, update_kline_data
 from app.models.stock_model import StockListResponse
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
@@ -12,7 +12,7 @@ async def list_stocks(params: Optional[Dict[str, Any]] = Body(default=None)):
     """
     获取股票列表
     """
-    stocks = query_stocks()
+    stocks = query_stocks_list()
     return StockListResponse(
         code=200,
         message="Success",
