@@ -340,6 +340,61 @@ def query_stocks_list() -> list[dict]:
         return [{"name": s.name, "code": s.code, "market": s.market} for s in stocks]
 
 
+def get_stock_data_database(code: str, market: str, period: str, start_timestamp: str, end_timestamp: str) -> pd.DataFrame | None:
+    """从数据库读取K线数据
+
+    Args:
+        code: 股票代码
+        market: 市场类型 sh/sz
+        period: 周期，如 "d", "60", "30", "5", "w", "m", "y"
+        start_timestamp: 开始日期/时间 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS
+        end_timestamp: 结束日期/时间 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS
+
+    Returns:
+        DataFrame 或 None（周期不支持时）
+    """
+    normalized = PERIOD_MAP.get(period.lower(), period)
+    model_class = get_kline_model(normalized)
+    if model_class is None:
+        return None
+
+    with get_session() as session:
+        query = session.query(model_class).filter(
+            model_class.code == code,
+            model_class.market == market,
+        )
+
+        # 日期类模型按 date 列筛选，时间类模型按 start_time 列筛选
+        if hasattr(model_class, 'date'):
+            start_dt = datetime.strptime(start_timestamp[:10], "%Y-%m-%d").date()
+            end_dt = datetime.strptime(end_timestamp[:10], "%Y-%m-%d").date()
+            query = query.filter(
+                model_class.date >= start_dt,
+                model_class.date <= end_dt,
+            )
+        else:
+            start_dt = datetime.strptime(start_timestamp[:19], "%Y-%m-%d %H:%M:%S") if len(start_timestamp) > 10 else datetime.strptime(start_timestamp[:10], "%Y-%m-%d")
+            end_dt = datetime.strptime(end_timestamp[:19], "%Y-%m-%d %H:%M:%S") if len(end_timestamp) > 10 else datetime.strptime(end_timestamp[:10], "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.filter(
+                model_class.start_time >= start_dt,
+                model_class.start_time <= end_dt,
+            )
+
+        rows = query.order_by(model_class.date if hasattr(model_class, 'date') else model_class.start_time).all()
+
+    if not rows:
+        return pd.DataFrame()
+
+    records = []
+    for row in rows:
+        record = {}
+        for col in model_class.__table__.columns:
+            record[col.name] = getattr(row, col.name)
+        records.append(record)
+
+    return pd.DataFrame(records)
+
+
 def search_stocks(keyword: str, market: str | None = None, limit: int = 5) -> list[dict]:
     """搜索股票（按代码或名称模糊匹配）"""
     with get_session() as session:
