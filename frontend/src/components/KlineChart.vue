@@ -64,9 +64,9 @@ const updateChart = () => {
   if (props.chanData.fractals) {
     props.chanData.fractals.forEach(fractal => {
       if (fractal.type === 'top') {
-        topFractals.push([fractal.date, fractal.price])
+        topFractals.push([fractal.date, props.chanData.chan_klines[fractal.index].high])
       } else {
-        bottomFractals.push([fractal.date, fractal.price])
+        bottomFractals.push([fractal.date, props.chanData.chan_klines[fractal.index].low])
       }
     })
   }
