@@ -1,7 +1,7 @@
 """股票数据API接口"""
 from fastapi import APIRouter, Query, Body
 from typing import Optional, Dict, Any, List
-from app.service.stock import get_stock_data_bao, query_stocks_list, search_stocks, update_kline_data
+from app.service.stock import get_stock_data_bao, query_stocks_list, search_stocks, update_kline_data, update_all_stock, get_stock_data_database
 from app.models.stock_model import StockListResponse
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
@@ -45,17 +45,35 @@ async def get_kline_data(
 ):
     """
     获取股票K线数据
+    优先从数据库读取，数据库无数据时回退到baostock在线拉取
     """
     print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
-    df = get_stock_data_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
-    if df is False:
-        print("获取数据失败，返回False")
+
+    # 优先从数据库读取
+    df = get_stock_data_database(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
+
+    if df is not None and not df.empty:
+        print(f"从数据库读取到 {len(df)} 条K线数据")
     else:
-        print(df.info())
+        # 数据库无数据，从baostock在线拉取
+        print("数据库无数据，从baostock在线拉取")
+        df = get_stock_data_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
+        if df is False or df is None or (hasattr(df, 'empty') and df.empty):
+            return {
+                "code": 500,
+                "message": "获取K线数据失败",
+                "data": None
+            }
 
     # 只保留需要的列并转换
     if period == "hour" or period == '60' or period == '60F' or period == '30F' or period == '5F':
-        df['date'] = df['end_time']
+        if 'end_time' in df.columns:
+            df['date'] = df['end_time'].astype(str)
+
+    # 确保date列存在且为字符串
+    if 'date' in df.columns:
+        df['date'] = df['date'].astype(str)
+
     klines = df[
             ['date', 'open', 'high', 'low', 'close', 'volume', 'period', 'level', 'code']
         ].to_dict('records')
@@ -69,6 +87,26 @@ async def get_kline_data(
             "period": period,
             "klines": klines
         }
+    }
+
+
+@router.post("/refresh-list", response_model=dict)
+async def refresh_stock_list():
+    """
+    从baostock刷新股票列表到数据库
+    """
+    result = update_all_stock()
+    if result is False or (hasattr(result, 'empty') and result.empty):
+        return {
+            "code": 500,
+            "message": "刷新股票列表失败，请稍后重试",
+            "data": None
+        }
+    count = len(result) if result is not None else 0
+    return {
+        "code": 200,
+        "message": f"成功刷新 {count} 只股票",
+        "data": {"count": count}
     }
 
 

@@ -140,8 +140,27 @@ def update_all_stock(day: str | None = None):
         lg = bs.login()
         print('login respond error_code:' + lg.error_code)
         print('login respond  error_msg:' + lg.error_msg)
-        res = bs.query_all_stock(day).get_data()
-        df = res.copy()
+        rs = bs.query_all_stock(day)
+        # 手动遍历结果集，避免 baostock get_data() 在新版 pandas 中
+        # 因 DataFrame.append() 被移除而报错
+        rows = []
+        fields = rs.fields if isinstance(rs.fields, list) else rs.fields.split(',') if rs.fields else []
+        while rs.next():
+            rows.append(rs.get_row_data())
+        if not rows:
+            print("warning: baostock returned no stock data for", day, ", retrying with previous day")
+            # 当天数据可能未更新（非交易日），尝试前一天
+            from datetime import timedelta
+            prev_day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            rs = bs.query_all_stock(prev_day)
+            fields = rs.fields if isinstance(rs.fields, list) else rs.fields.split(',') if rs.fields else []
+            while rs.next():
+                rows.append(rs.get_row_data())
+            if not rows:
+                print("warning: baostock returned no stock data for", prev_day, "either")
+                return pd.DataFrame()
+            day = prev_day
+        df = pd.DataFrame(rows, columns=fields)
         df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
         df['market'] = df['market'].str.lower()
         df = df.drop(columns=['code', 'tradeStatus'])
@@ -382,15 +401,16 @@ def get_stock_data_database(code: str, market: str, period: str, start_timestamp
 
         rows = query.order_by(model_class.date if hasattr(model_class, 'date') else model_class.start_time).all()
 
-    if not rows:
-        return pd.DataFrame()
+        if not rows:
+            return pd.DataFrame()
 
-    records = []
-    for row in rows:
-        record = {}
-        for col in model_class.__table__.columns:
-            record[col.name] = getattr(row, col.name)
-        records.append(record)
+        # 必须在 session 内完成 ORM → dict 转换，否则会话关闭后访问属性会报 DetachedInstanceError
+        records = []
+        for row in rows:
+            record = {}
+            for col in model_class.__table__.columns:
+                record[col.name] = getattr(row, col.name)
+            records.append(record)
 
     return pd.DataFrame(records)
 

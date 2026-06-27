@@ -42,6 +42,12 @@
           <el-button type="primary" @click="loadData" :loading="loading">
             刷新数据
           </el-button>
+          <el-button type="success" @click="handleRefreshStockList" :loading="refreshingList">
+            更新股票列表
+          </el-button>
+          <el-button type="warning" @click="handleUpdateKline" :loading="updatingKline" :disabled="!currentStock">
+            更新K线数据
+          </el-button>
         </div>
       </div>
 
@@ -86,6 +92,7 @@ import { ElMessage } from 'element-plus'
 import KlineChart from '../components/KlineChart.vue'
 import StockSelector from '../components/StockSelector.vue'
 import { getChanAnalysis } from '../api/chan'
+import { refreshStockList, updateKlineData } from '../api/stock'
 
 interface Stock {
   code: string
@@ -97,6 +104,8 @@ const currentStock = ref<Stock | null>(null)
 const period = ref('daily')
 const processInclude = ref(true)
 const loading = ref(false)
+const refreshingList = ref(false)
+const updatingKline = ref(false)
 const klineData = ref<any[]>([])
 const chanData = ref<{
   fractals?: any[]
@@ -112,6 +121,51 @@ const dateRange = ref<[string, string]>([
 const handleStockChange = (stock: Stock) => {
   currentStock.value = stock
   loadData()
+}
+
+const handleRefreshStockList = async () => {
+  refreshingList.value = true
+  try {
+    const response = await refreshStockList()
+    if (response?.code === 200) {
+      ElMessage.success(response.message || '股票列表更新成功')
+    } else {
+      ElMessage.error(response?.message || '股票列表更新失败')
+    }
+  } catch (error: any) {
+    ElMessage.error(`更新失败：${error?.message || '未知错误'}`)
+  } finally {
+    refreshingList.value = false
+  }
+}
+
+const handleUpdateKline = async () => {
+  if (!currentStock.value) {
+    ElMessage.warning('请先选择股票')
+    return
+  }
+  updatingKline.value = true
+  try {
+    const params: Record<string, string> = {
+      code: currentStock.value.code,
+      market: currentStock.value.market
+    }
+    if (dateRange.value && dateRange.value[0]) {
+      params.start_date = dateRange.value[0]
+      params.end_date = dateRange.value[1]
+    }
+    const response = await updateKlineData(params)
+    if (response?.code === 200) {
+      ElMessage.success('K线数据更新成功')
+      loadData()
+    } else {
+      ElMessage.error(response?.message || 'K线数据更新失败')
+    }
+  } catch (error: any) {
+    ElMessage.error(`更新失败：${error?.message || '未知错误'}`)
+  } finally {
+    updatingKline.value = false
+  }
 }
 
 const loadData = async () => {

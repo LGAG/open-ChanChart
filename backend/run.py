@@ -33,7 +33,7 @@ if __name__ == "__main__":
     update_all_stock()
 
     host = os.getenv("API_HOST", "0.0.0.0")
-    port = int(os.getenv("API_PORT", "8000"))
+    port = int(os.getenv("API_PORT", "8001"))
 
     uvicorn.run(
         "app.main:app",

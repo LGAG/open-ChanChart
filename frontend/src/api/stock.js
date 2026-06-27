@@ -21,3 +21,24 @@ export function getKlineData(params) {
     params
   })
 }
+
+/**
+ * Refresh stock list from baostock
+ */
+export function refreshStockList() {
+  return request({
+    url: '/api/stock/refresh-list',
+    method: 'post'
+  })
+}
+
+/**
+ * Update K-line data to database
+ */
+export function updateKlineData(params) {
+  return request({
+    url: '/api/stock/update',
+    method: 'post',
+    params
+  })
+}

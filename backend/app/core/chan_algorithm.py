@@ -1,5 +1,5 @@
 """缠论核心算法实现"""
-from typing import List, Tuple
+from typing import List
 from app.models.stock_model import KlineData
 from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu, DAY
 
@@ -206,114 +206,137 @@ def generate_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> Li
     # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
     return pens
 
-def find_first_pen(fractals: List[Fractal], klines: List[ClassicChanKline], start: int) -> Tuple[Pen, int, int]:
+def _can_form_pen(
+    start_fractal: Fractal,
+    end_fractal: Fractal,
+    klines: List[ClassicChanKline],
+) -> bool:
     """
-    找到第一根笔
-    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根缠论K线
+    判断两个分型能否成笔 (§2.2 + §2.3 of pen.md)
+
+    必须同时满足:
+    1. 类型交替 — 一顶一底
+    2. 间距足够 — 缠论K线索引差 >= 3 且 原始K线间距 >= 4 (之间至少3条实际K线)
+    3. 方向正确 — 上升笔终点严格高于起点，下降笔终点严格低于起点
+
+    若间距不足但存在价格跳空缺口 (§2.3)，也可成笔。
     """
-    for i in range(start + 1, len(fractals)):
-        if fractals[i].type != fractals[i - 1].type and abs(fractals[i].index - fractals[i - 1].index) >= 3 and abs(klines[fractals[i].index].start - klines[fractals[i - 1].index].end) >= 4:
-            pen = Pen(
-                start_index=fractals[i - 1].index,
-                end_index=fractals[i].index,
-                start_date=fractals[i - 1].date,
-                end_date=fractals[i].date,
-                direction="up" if fractals[i - 1].type == "bottom" else "down"
-            )
-            return pen, i, i + 1
-    return None, start, start
+    # 1. 类型交替
+    if start_fractal.type == end_fractal.type:
+        return False
+
+    direction = "up" if start_fractal.type == "bottom" else "down"
+
+    # 2. 间距检查 — 缠论K线索引差和原始K线间距
+    chan_gap = abs(end_fractal.index - start_fractal.index)
+    raw_gap = abs(klines[end_fractal.index].start - klines[start_fractal.index].end)
+    spacing_ok = chan_gap >= 3 and raw_gap >= 4
+
+    # 3. 方向正确性 — 价格必须朝预期方向运动
+    if direction == "up":
+        price_ok = klines[end_fractal.index].high > klines[start_fractal.index].low
+    else:
+        price_ok = klines[end_fractal.index].low < klines[start_fractal.index].high
+
+    if spacing_ok and price_ok:
+        return True
+
+    # 4. 缺口成笔 (§2.3) — 间距不足时，若存在价格跳空缺口也可成笔
+    if not spacing_ok and price_ok:
+        if direction == "up":
+            # 向上笔：底分型中心K线的下一根K线向上跳空
+            if start_fractal.index + 1 < len(klines):
+                if klines[start_fractal.index + 1].low > klines[start_fractal.index].high:
+                    return True
+        else:
+            # 向下笔：顶分型中心K线的下一根K线向下跳空
+            if start_fractal.index + 1 < len(klines):
+                if klines[start_fractal.index + 1].high < klines[start_fractal.index].low:
+                    return True
+
+    return False
+
 
 def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
     """
-    生成新笔
-    笔是由一个顶分型和一个底分型组成的，且两个分型之间至少间隔一根K线
+    生成新笔 (§2.1–§2.4 of pen.md)
+
+    算法：
+    - 顺序遍历分型列表，维护"当前笔起始分型"。
+    - 遇到反向分型时，尝试成笔（类型交替 + 间距 + 方向 + 可选缺口）。
+    - 若成笔，发出该笔，反向分型成为新的起始分型候选。
+    - 若遇到同方向更极端的分型（更高的顶/更低的底），替换当前起始分型（§2.4 笔的延伸）。
+    - 其余情况跳过。
     """
     if len(fractals) < 2:
         return []
-    
-    pens = []
-    
-    left = 0
-    right = 1
-    
-    # 第一步：找到第一根笔
-    first_pen, left, right = find_first_pen(fractals, klines, left)
-    if first_pen is not None:
-        pens.append(first_pen)
-    if len(pens) == 0:
-        return []
-    
-    # 然后才是逐个处理后面的顶底分型
-    while right < len(fractals):
-        start_fractal = fractals[left]
-        end_fractal = fractals[right]
-        print(f"start_fractal: {start_fractal}, end_fractal: {end_fractal}")
-        
-        # 检查是否符合笔的条件：类型交替且间隔足够
-        if start_fractal.type != end_fractal.type and abs(end_fractal.index - start_fractal.index) >= 3 and abs(klines[end_fractal.index].start - klines[start_fractal.index].end) >= 4:
-            direction = "up" if start_fractal.type == "bottom" else "down"
-            if direction == pens[-1].direction:
-                pens[-1].end_index = end_fractal.index
-                pens[-1].end_date = end_fractal.date
-            else:
-                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
-                pens.append(Pen(
-                    start_index=start_fractal.index,
-                    end_index=end_fractal.index,
-                    start_date=start_fractal.date,
-                    end_date=end_fractal.date,
-                    direction=direction
-                ))
-        # 如果存在反向缺口，则也能生成笔
-        elif (pens[-1].direction == "up" and end_fractal.type == "bottom" and klines[start_fractal.index + 1].high <= klines[pens[-1].start_index].low) or (pens[-1].direction == "down" and end_fractal.type == "top" and klines[start_fractal.index + 1].low >= klines[pens[-1].start_index].high):
-            direction = "up" if start_fractal.type == "bottom" else "down"
-            if direction == pens[-1].direction:
-                pens[-1].end_index = end_fractal.index
-                pens[-1].end_date = end_fractal.date
-            else:
-                # 除非有新的反向笔生成，否则一律对最近的一笔进行延伸
-                pens.append(Pen(
-                    start_index=start_fractal.index,
-                    end_index=end_fractal.index,
-                    start_date=start_fractal.date,
-                    end_date=end_fractal.date,
-                    direction=direction
-                ))
-        else:
-            if pens[-1].direction == "down" and end_fractal.type == "bottom":
-                if klines[pens[-1].start_index].high < klines[end_fractal.index].low:
-                    pens.pop()
-                    if len(pens) == 0:
-                        first_pen, left, right = find_first_pen(fractals, klines, left)
-                        if first_pen is not None:
-                            pens.append(first_pen)
-                        else:
-                            return pens
-                    pens[-1].end_index = start_fractal.index
-                    pens[-1].end_date = start_fractal.date
-                    continue
-                pens[-1].end_index = end_fractal.index
-                pens[-1].end_date = end_fractal.date
-            elif pens[-1].direction == "up" and end_fractal.type == "top":
-                if klines[pens[-1].start_index].low > klines[end_fractal.index].high:
-                    pens.pop()
-                    if len(pens) == 0:
-                        first_pen, left, right = find_first_pen(fractals, klines, left)
-                        if first_pen is not None:
-                            pens.append(first_pen)
-                        else:
-                            return pens
-                    pens[-1].end_index = start_fractal.index
-                    pens[-1].end_date = start_fractal.date
-                    continue
-                pens[-1].end_index = end_fractal.index
-                pens[-1].end_date = end_fractal.date
 
-        left += 1
-        right += 1
-    
-    print(pens)
-    # 最后一个顶底分型之后的k线暂不做处理，感觉肉眼也能观察出来，可以之后再考虑怎么处理
+    pens: List[Pen] = []
+
+    # 阶段1：找到第一笔作为引导
+    start_idx = 0
+    found_first = False
+    for i in range(1, len(fractals)):
+        if _can_form_pen(fractals[start_idx], fractals[i], klines):
+            direction = "up" if fractals[start_idx].type == "bottom" else "down"
+            pens.append(Pen(
+                start_index=fractals[start_idx].index,
+                end_index=fractals[i].index,
+                start_date=fractals[start_idx].date,
+                end_date=fractals[i].date,
+                direction=direction,
+            ))
+            start_idx = i
+            found_first = True
+            break
+        # 同类型 — 保留更极端的分型（更高的顶或更低的底）
+        if fractals[i].type == fractals[start_idx].type:
+            if fractals[i].type == "top":
+                if klines[fractals[i].index].high > klines[fractals[start_idx].index].high:
+                    start_idx = i
+            else:
+                if klines[fractals[i].index].low < klines[fractals[start_idx].index].low:
+                    start_idx = i
+
+    if not found_first:
+        return []
+
+    # 阶段2：逐个处理剩余分型
+    current_start = start_idx
+    for i in range(start_idx + 1, len(fractals)):
+        candidate = fractals[i]
+        start_f = fractals[current_start]
+
+        if candidate.type != start_f.type:
+            # 反向分型 — 尝试成笔
+            if _can_form_pen(start_f, candidate, klines):
+                direction = "up" if start_f.type == "bottom" else "down"
+                pens.append(Pen(
+                    start_index=start_f.index,
+                    end_index=candidate.index,
+                    start_date=start_f.date,
+                    end_date=candidate.date,
+                    direction=direction,
+                ))
+                current_start = i
+            # else: 间距不足/方向不对/无缺口 — 跳过
+        else:
+            # 同类型 — §2.4 笔的延伸：用更极端的分型替换当前起始分型
+            replaced = False
+            if candidate.type == "top":
+                if klines[candidate.index].high > klines[start_f.index].high:
+                    replaced = True
+            else:  # bottom
+                if klines[candidate.index].low < klines[start_f.index].low:
+                    replaced = True
+
+            if replaced:
+                current_start = i
+                # 同步延伸最近一笔的终点到更极端的分型
+                if pens:
+                    pens[-1].end_index = candidate.index
+                    pens[-1].end_date = candidate.date
+
     return pens
 
 
