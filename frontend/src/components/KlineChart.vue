@@ -1,6 +1,16 @@
 <template>
-  <div class="kline-chart">
-    <div ref="chartRef" style="width: 100%; height: 600px;"></div>
+  <div class="kline-chart" :class="{ 'is-fullscreen': isFullscreen }">
+    <div class="chart-actions">
+      <button class="fullscreen-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏展示'">
+        <svg v-if="!isFullscreen" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 4h-4v2h6v-6h-2v4z"/>
+        </svg>
+        <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M9 3H7v4H3v2h6V3zm8 0h-2v6h6V7h-4V3zM9 21v-6H3v2h4v4h2zm8-4h4v-2h-6v6h2v-4z"/>
+        </svg>
+      </button>
+    </div>
+    <div ref="chartRef" class="chart-container"></div>
   </div>
 </template>
 
@@ -21,10 +31,27 @@ const props = defineProps({
 
 const chartRef = ref(null)
 let chartInstance = null
+const isFullscreen = ref(false)
+
+const toggleFullscreen = () => {
+  isFullscreen.value = !isFullscreen.value
+  document.body.style.overflow = isFullscreen.value ? 'hidden' : ''
+  nextTick(() => {
+    if (chartInstance) {
+      chartInstance.resize()
+    }
+  })
+}
+
+const handleEscape = (e) => {
+  if (e.key === 'Escape' && isFullscreen.value) {
+    toggleFullscreen()
+  }
+}
 
 const initChart = () => {
   if (!chartRef.value) return
-  
+
   chartInstance = echarts.init(chartRef.value)
   updateChart()
 }
@@ -67,10 +94,10 @@ const updateChart = () => {
       if (startPen && endPen) {
         if (seg.direction === 'up') {
           segmentLineData.push([startPen.start_date, props.chanData.chan_klines[startPen.start_index].low])
-          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.end_index].high])
+          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.start_index].high])
         } else {
           segmentLineData.push([startPen.start_date, props.chanData.chan_klines[startPen.start_index].high])
-          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.end_index].low])
+          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.start_index].low])
         }
         segmentLineData.push([null, null]) // Break line between segments
       }
@@ -329,10 +356,13 @@ onMounted(() => {
     initChart()
   })
   window.addEventListener('resize', handleResize)
+  document.addEventListener('keydown', handleEscape)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  document.removeEventListener('keydown', handleEscape)
+  document.body.style.overflow = ''
   if (chartInstance) {
     chartInstance.dispose()
   }
@@ -342,5 +372,66 @@ onBeforeUnmount(() => {
 <style scoped>
 .kline-chart {
   width: 100%;
+  position: relative;
+}
+
+.chart-container {
+  width: 100%;
+  height: 600px;
+}
+
+.chart-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+}
+
+.fullscreen-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #fff;
+  color: #606266;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fullscreen-btn:hover {
+  color: #409eff;
+  border-color: #409eff;
+}
+
+/* Fullscreen overlay styles */
+.kline-chart.is-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  background: #fff;
+  padding: 0;
+}
+
+.kline-chart.is-fullscreen .chart-container {
+  height: 100%;
+}
+
+.kline-chart.is-fullscreen .chart-actions {
+  top: 12px;
+  right: 12px;
+}
+
+.kline-chart.is-fullscreen .fullscreen-btn {
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 </style>
