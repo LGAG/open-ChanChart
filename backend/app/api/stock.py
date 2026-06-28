@@ -1,7 +1,8 @@
 """股票数据API接口"""
 from fastapi import APIRouter, Query, Body
 from typing import Optional, Dict, Any, List
-from app.service.stock import get_stock_data_bao, query_stocks_list, search_stocks, update_kline_data, update_all_stock, get_stock_data_database
+from datetime import datetime
+from app.service.stock import get_stock_data_bao, query_stocks_list, search_stocks, update_kline_data, update_all_stock, get_stock_data_database, get_kline_date_range
 from app.models.stock_model import StockListResponse
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
@@ -45,25 +46,59 @@ async def get_kline_data(
 ):
     """
     获取股票K线数据
-    优先从数据库读取，数据库无数据时回退到baostock在线拉取
+    优先从数据库读取；如果数据库数据不覆盖请求的日期范围，则先更新数据库再读取。
     """
     print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
 
-    # 优先从数据库读取
+    # 检查数据库中该股票该周期的日期覆盖范围
+    db_min, db_max = get_kline_date_range(code, market, period)
+    request_start = datetime.strptime(start_date[:10], "%Y-%m-%d").date()
+    request_end = datetime.strptime(end_date[:10], "%Y-%m-%d").date()
+
+    need_update = False
+    if db_min is None or db_max is None:
+        # 数据库中完全没有该数据
+        print(f"数据库中无 {code}({market}) {period} 数据，需要更新")
+        need_update = True
+    elif db_min > request_start:
+        # 数据库最早日期晚于请求起始日期，缺少前期数据
+        print(f"数据库数据不完整：最早日期 {db_min} 晚于请求起始日期 {request_start}，需要更新")
+        need_update = True
+    elif db_max < request_end:
+        # 数据库最晚日期早于请求结束日期，缺少近期数据
+        print(f"数据库数据不完整：最晚日期 {db_max} 早于请求结束日期 {request_end}，需要更新")
+        need_update = True
+
+    if need_update:
+        # 从baostock拉取缺失范围的完整数据并写入数据库
+        update_start = start_date[:10]
+        update_end = end_date[:10]
+        # 如果数据库有部分数据，扩大更新范围以覆盖缺口
+        if db_min is not None and db_min <= request_start and db_max < request_end:
+            # 只缺近期数据，从数据库最晚日期开始更新
+            update_start = db_max.strftime("%Y-%m-%d")
+        elif db_min is not None and db_min > request_start and db_max >= request_end:
+            # 只缺前期数据，更新到数据库最早日期
+            update_end = db_min.strftime("%Y-%m-%d")
+        print(f"从baostock更新 {code}({market}) {period} 数据：{update_start} ~ {update_end}")
+        update_kline_data(code=code, market=market, periods=[period], start_date=update_start, end_date=update_end)
+
+    # 从数据库读取（更新后的完整数据）
     df = get_stock_data_database(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
 
-    if df is not None and not df.empty:
-        print(f"从数据库读取到 {len(df)} 条K线数据")
-    else:
-        # 数据库无数据，从baostock在线拉取
-        print("数据库无数据，从baostock在线拉取")
+    if df is None or df.empty:
+        # 数据库仍无数据，尝试直接从baostock获取（不写库的兜底）
+        print("数据库仍无数据，尝试从baostock直接获取")
         df = get_stock_data_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
-        if df is False or df is None or (hasattr(df, 'empty') and df.empty):
-            return {
-                "code": 500,
-                "message": "获取K线数据失败",
-                "data": None
-            }
+
+    if df is False or df is None or (hasattr(df, 'empty') and df.empty):
+        return {
+            "code": 500,
+            "message": "获取K线数据失败",
+            "data": None
+        }
+
+    print(f"获取到 {len(df)} 条K线数据")
 
     # 只保留需要的列并转换
     if period == "hour" or period == '60' or period == '60F' or period == '30F' or period == '5F':

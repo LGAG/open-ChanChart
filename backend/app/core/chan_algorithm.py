@@ -210,6 +210,7 @@ def _can_form_pen(
     start_fractal: Fractal,
     end_fractal: Fractal,
     klines: List[ClassicChanKline],
+    prev_pen: Pen | None = None,
 ) -> bool:
     """
     判断两个分型能否成笔 (§2.2 + §2.3 of pen.md)
@@ -220,6 +221,10 @@ def _can_form_pen(
     3. 方向正确 — 上升笔终点严格高于起点，下降笔终点严格低于起点
 
     若间距不足但存在价格跳空缺口 (§2.3)，也可成笔。
+    缺口成笔条件：
+    - 向上跳空：缺口K线必须是底分型的右侧K线，且缺口完全高于前一笔的最高点
+    - 向下跳空：缺口K线必须是顶分型的右侧K线，且缺口完全低于前一笔的最低点
+    - 无前一笔时，不允许缺口成笔
     """
     # 1. 类型交替
     if start_fractal.type == end_fractal.type:
@@ -242,17 +247,26 @@ def _can_form_pen(
         return True
 
     # 4. 缺口成笔 (§2.3) — 间距不足时，若存在价格跳空缺口也可成笔
-    if not spacing_ok and price_ok:
+    # 条件：缺口K线必须是分型右侧K线，且缺口完全高于/低于前一笔的最高/最低点
+    if not spacing_ok and price_ok and prev_pen is not None:
         if direction == "up":
-            # 向上笔：底分型中心K线的下一根K线向上跳空
+            # 向上跳空：底分型右侧K线(start_fractal.index + 1)向上跳空
+            # 缺口K线即底分型的右侧K线，缺口必须完全高于前一笔的最高点
             if start_fractal.index + 1 < len(klines):
-                if klines[start_fractal.index + 1].low > klines[start_fractal.index].high:
-                    return True
+                gap_kline = klines[start_fractal.index + 1]
+                if gap_kline.low > klines[start_fractal.index].high:
+                    # 存在缺口，检查是否完全高于前一笔最高点
+                    if gap_kline.low > _pen_high(prev_pen, klines):
+                        return True
         else:
-            # 向下笔：顶分型中心K线的下一根K线向下跳空
+            # 向下跳空：顶分型右侧K线(start_fractal.index + 1)向下跳空
+            # 缺口K线即顶分型的右侧K线，缺口必须完全低于前一笔的最低点
             if start_fractal.index + 1 < len(klines):
-                if klines[start_fractal.index + 1].high < klines[start_fractal.index].low:
-                    return True
+                gap_kline = klines[start_fractal.index + 1]
+                if gap_kline.high < klines[start_fractal.index].low:
+                    # 存在缺口，检查是否完全低于前一笔最低点
+                    if gap_kline.high < _pen_low(prev_pen, klines):
+                        return True
 
     return False
 
@@ -267,17 +281,19 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
     - 若成笔，发出该笔，反向分型成为新的起始分型候选。
     - 若遇到同方向更极端的分型（更高的顶/更低的底），替换当前起始分型（§2.4 笔的延伸）。
     - 其余情况跳过。
+
+    缺口成笔：间距不足时，若缺口K线（分型右侧K线）完全高于/低于前一笔的最高/最低点，也可成笔。
     """
     if len(fractals) < 2:
         return []
 
     pens: List[Pen] = []
 
-    # 阶段1：找到第一笔作为引导
+    # 阶段1：找到第一笔作为引导（第一笔没有前一笔，不支持缺口成笔）
     start_idx = 0
     found_first = False
     for i in range(1, len(fractals)):
-        if _can_form_pen(fractals[start_idx], fractals[i], klines):
+        if _can_form_pen(fractals[start_idx], fractals[i], klines, prev_pen=None):
             direction = "up" if fractals[start_idx].type == "bottom" else "down"
             pens.append(Pen(
                 start_index=fractals[start_idx].index,
@@ -308,8 +324,9 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
         start_f = fractals[current_start]
 
         if candidate.type != start_f.type:
-            # 反向分型 — 尝试成笔
-            if _can_form_pen(start_f, candidate, klines):
+            # 反向分型 — 尝试成笔，传入前一笔用于缺口判断
+            prev_pen = pens[-1] if pens else None
+            if _can_form_pen(start_f, candidate, klines, prev_pen=prev_pen):
                 direction = "up" if start_f.type == "bottom" else "down"
                 pens.append(Pen(
                     start_index=start_f.index,
@@ -340,98 +357,265 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
     return pens
 
 
+def _validate_pens(pens: List[Pen], klines: List[ClassicChanKline]) -> List[Pen]:
+    """
+    校验笔列表，消除平行笔（相邻同方向笔）。
+
+    规则：
+    1. 相邻两笔方向必须交替（up/down/up/down...）。
+    2. 若出现同方向相邻笔，将后一笔合并到前一笔（延伸终点），
+       因为同方向意味着后一笔的终点价格更极端。
+    3. 合并后再次校验，直到无平行笔。
+    """
+    if len(pens) <= 1:
+        return pens
+
+    changed = True
+    while changed:
+        changed = False
+        result: List[Pen] = [pens[0]]
+        for i in range(1, len(pens)):
+            prev = result[-1]
+            curr = pens[i]
+            if curr.direction == prev.direction:
+                # 平行笔：合并到前一笔（延伸终点到更极端位置）
+                if curr.direction == "up":
+                    # 向上：取更高的终点
+                    if klines[curr.end_index].high > klines[prev.end_index].high:
+                        prev.end_index = curr.end_index
+                        prev.end_date = curr.end_date
+                else:
+                    # 向下：取更低的终点
+                    if klines[curr.end_index].low < klines[prev.end_index].low:
+                        prev.end_index = curr.end_index
+                        prev.end_date = curr.end_date
+                changed = True
+            else:
+                result.append(curr)
+        pens = result
+
+    return pens
+
+
+def _pen_high(pen: Pen, klines: List[ClassicChanKline]) -> float:
+    """获取笔的最高价"""
+    if pen.direction == "up":
+        return klines[pen.end_index].high
+    return klines[pen.start_index].high
+
+
+def _pen_low(pen: Pen, klines: List[ClassicChanKline]) -> float:
+    """获取笔的最低价"""
+    if pen.direction == "up":
+        return klines[pen.start_index].low
+    return klines[pen.end_index].low
+
+
 def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[Segment]:
     """
     生成段
-    简化实现：如果发现了更高（低）的高点和更高（低）的低点，那么就认为向上（下）线段延伸，否则，就认为线段结束
+
+    简化规则：
+    - 在向上段中，如果某根向下笔的最高点和最低点都低于前一根向下笔的最高点和最低点，
+      则向上段结束，该向下笔成为新向下段的第一根笔。
+    - 在向下段中，如果某根向上笔的最高点和最低点都高于前一根向上笔的最高点和最低点，
+      则向下段结束，该向上笔成为新向上段的第一根笔。
+
+    约束：
+    - 每段至少包含3根笔
+    - 不允许平行段（相邻段方向必须交替）
+    - 向上段终点高于起点，向下段终点低于起点
     """
     if len(pens) < 3:
         return []
-    
-    segments = []
-    current_idx = 0
 
-    # 首先寻找第一个线段
-    for i in range(current_idx, len(pens) - 2):
-        if pens[i].direction == 'up' and klines[pens[i+2].start_index].low >= klines[pens[i].start_index].low and klines[pens[i+2].end_index].high >= klines[pens[i].end_index].high:
-            current_idx = i + 3
-            segments.append(Segment(
-                start_index=i,
-                end_index=i+2,
-                top=klines[pens[i+2].end_index].high,
-                bottom=klines[pens[2].start_index].low,
-                direction='up'
-            ))
-            break
-        elif pens[i].direction == 'down' and klines[pens[i+2].start_index].low <= klines[pens[i].start_index].low and klines[pens[i+2].end_index].high <= klines[pens[i].end_index].high:
-            current_idx = i + 3
-            segments.append(Segment(
-                start_index=i,
-                end_index=i+2,
-                top=klines[pens[i].start_index].high,
-                bottom=klines[pens[i+2].end_index].low,
-                direction='up'
-            ))
-            break
-    if len(segments) == 0:
-        print("warning: 没有找到第一个线段")
-        return segments
+    MIN_SEGMENT_PENS = 3
 
-    # 然后寻找后续的线段
-    while current_idx < len(pens) - 2:
-        if segments[-1].direction == 'up':
-            if klines[pens[current_idx+2].start_index].low <= klines[pens[current_idx].start_index].low and klines[pens[current_idx+2].end_index].high <= klines[pens[current_idx].end_index].high:
-                segments.append(Segment(
-                    start_index=current_idx,
-                    end_index=current_idx+2,
-                    top=klines[pens[current_idx].start_index].high,
-                    bottom=klines[pens[current_idx+2].end_index].low,
-                    direction='down'
-                ))
-                current_idx += 3
-                continue
-        if segments[-1].direction == 'down':
-            if klines[pens[current_idx+2].start_index].low >= klines[pens[current_idx].start_index].low and klines[pens[current_idx+2].end_index].high >= klines[pens[current_idx].end_index].high:
-                segments.append(Segment(
-                    start_index=current_idx,
-                    end_index=current_idx+2,
-                    top=klines[pens[current_idx+2].end_index].high,
-                    bottom=klines[pens[current_idx].start_index].low,
-                    direction='up'
-                ))
-                current_idx += 3
-                continue
-        segments[-1].end_index = current_idx + 2
-        current_idx += 2
-    
+    segments: List[Segment] = []
+    seg_start = 0
+    seg_direction = pens[0].direction
+
+    def _close_segment(end_idx: int, direction: str) -> None:
+        """将当前段收尾并加入列表"""
+        top = max(_pen_high(pens[i], klines) for i in range(seg_start, end_idx + 1))
+        bottom = min(_pen_low(pens[i], klines) for i in range(seg_start, end_idx + 1))
+        segments.append(Segment(
+            start_index=seg_start,
+            end_index=end_idx,
+            top=top,
+            bottom=bottom,
+            direction=direction,
+        ))
+
+    for i in range(1, len(pens)):
+        pen = pens[i]
+        pen_count = i - seg_start  # 当前段内笔数（不含当前笔 i）
+
+        if seg_direction == "up" and pen.direction == "down":
+            # 向上段中遇到向下笔：与同方向的前一根向下笔比较
+            prev_same_dir = None
+            for j in range(i - 1, seg_start - 1, -1):
+                if pens[j].direction == "down":
+                    prev_same_dir = pens[j]
+                    break
+            if prev_same_dir is not None:
+                if _pen_high(pen, klines) < _pen_high(prev_same_dir, klines) and \
+                   _pen_low(pen, klines) < _pen_low(prev_same_dir, klines):
+                    # 向下笔更低 → 向上段结束
+                    # 但必须保证当前段至少有 MIN_SEGMENT_PENS 根笔
+                    if pen_count >= MIN_SEGMENT_PENS:
+                        _close_segment(i - 1, "up")
+                        seg_start = i
+                        seg_direction = "down"
+                        continue
+
+        elif seg_direction == "down" and pen.direction == "up":
+            # 向下段中遇到向上笔：与同方向的前一根向上笔比较
+            prev_same_dir = None
+            for j in range(i - 1, seg_start - 1, -1):
+                if pens[j].direction == "up":
+                    prev_same_dir = pens[j]
+                    break
+            if prev_same_dir is not None:
+                if _pen_high(pen, klines) > _pen_high(prev_same_dir, klines) and \
+                   _pen_low(pen, klines) > _pen_low(prev_same_dir, klines):
+                    # 向上笔更高 → 向下段结束
+                    # 但必须保证当前段至少有 MIN_SEGMENT_PENS 根笔
+                    if pen_count >= MIN_SEGMENT_PENS:
+                        _close_segment(i - 1, "down")
+                        seg_start = i
+                        seg_direction = "up"
+                        continue
+
+    # 收尾最后一段（仅当剩余笔数 >= MIN_SEGMENT_PENS 时才独立成段）
+    remaining_pens = len(pens) - seg_start
+    if remaining_pens >= MIN_SEGMENT_PENS:
+        _close_segment(len(pens) - 1, seg_direction)
+    elif remaining_pens > 0 and segments:
+        # 不足3笔的尾部合并到前一段
+        segments[-1].end_index = len(pens) - 1
+        segments[-1].top = max(
+            segments[-1].top,
+            max(_pen_high(pens[i], klines) for i in range(seg_start, len(pens)))
+        )
+        segments[-1].bottom = min(
+            segments[-1].bottom,
+            min(_pen_low(pens[i], klines) for i in range(seg_start, len(pens)))
+        )
+    # 若尾部不足3笔且无前一段可合并，则丢弃尾部（无法构成有效段）
+
+    # 后处理校验：消除不合规的段
+    segments = _validate_segments(segments, pens, klines, MIN_SEGMENT_PENS)
+
     return segments
 
 
-def identify_zhongshus(pens: List[Pen], level = DAY) -> List[ZhongShu]:
+def _validate_segments(
+    segments: List[Segment], pens: List[Pen], klines: List[ClassicChanKline], min_pens: int = 3
+) -> List[Segment]:
+    """
+    校验段列表，修复以下问题：
+    1. 段内笔数不足min_pens根 → 合并到前一段
+    2. 段方向与实际价格走势矛盾 → 翻转方向
+       - 向上段：实际最高价所在的笔索引 应 > 实际最低价所在的笔索引（高点在低点之后）
+       - 向下段：实际最低价所在的笔索引 应 > 实际最高价所在的笔索引（低点在高点之后）
+       - 若矛盾，说明方向标注错误，翻转方向
+    3. 相邻段方向相同（平行段）→ 合并到前一段
+    """
+    if not segments:
+        return segments
+
+    def _find_top_bottom_indices(seg: Segment):
+        """找到段内实际最高价和最低价所在的笔索引"""
+        top_idx = seg.start_index
+        bottom_idx = seg.start_index
+        top_val = _pen_high(pens[seg.start_index], klines)
+        bottom_val = _pen_low(pens[seg.start_index], klines)
+        for i in range(seg.start_index + 1, seg.end_index + 1):
+            h = _pen_high(pens[i], klines)
+            l = _pen_low(pens[i], klines)
+            if h > top_val:
+                top_val = h
+                top_idx = i
+            if l < bottom_val:
+                bottom_val = l
+                bottom_idx = i
+        return top_idx, bottom_idx
+
+    def _fix_direction(seg: Segment) -> None:
+        """根据实际价格走势修正段方向"""
+        top_idx, bottom_idx = _find_top_bottom_indices(seg)
+        if seg.direction == "up" and top_idx < bottom_idx:
+            seg.direction = "down"
+        elif seg.direction == "down" and bottom_idx < top_idx:
+            seg.direction = "up"
+
+    result: List[Segment] = []
+
+    for seg in segments:
+        # 段内笔数不足min_pens根 → 合并到前一段
+        pen_count = seg.end_index - seg.start_index + 1
+        if pen_count < min_pens and result:
+            prev = result[-1]
+            prev.end_index = seg.end_index
+            prev.top = max(prev.top, seg.top)
+            prev.bottom = min(prev.bottom, seg.bottom)
+            _fix_direction(prev)
+            continue
+
+        # 段方向与实际价格走势矛盾 → 翻转方向
+        _fix_direction(seg)
+
+        # 平行段：与前一段方向相同 → 合并到前一段
+        if result and result[-1].direction == seg.direction:
+            prev = result[-1]
+            prev.end_index = seg.end_index
+            prev.top = max(prev.top, seg.top)
+            prev.bottom = min(prev.bottom, seg.bottom)
+            _fix_direction(prev)
+            continue
+
+        result.append(seg)
+
+    # 后处理：如果第一段笔数不足，合并到第二段
+    if len(result) >= 2 and (result[0].end_index - result[0].start_index + 1) < min_pens:
+        first = result.pop(0)
+        result[0].start_index = first.start_index
+        result[0].top = max(first.top, result[0].top)
+        result[0].bottom = min(first.bottom, result[0].bottom)
+        _fix_direction(result[0])
+
+    # 移除仍然不足min_pens根笔的首段（无法合并也无法补足）
+    if result and (result[0].end_index - result[0].start_index + 1) < min_pens:
+        result.pop(0)
+
+    return result
+
+
+def identify_zhongshus(pens: List[Pen], klines: List[ClassicChanKline], level = DAY) -> List[ZhongShu]:
     """
     识别中枢
     简化实现：至少三笔重叠的区域构成中枢
     """
     if len(pens) < 3:
         return []
-    
+
     zhongshus = []
-    
+
     for i in range(len(pens) - 2):
         pen1, pen2, pen3 = pens[i], pens[i + 1], pens[i + 2]
-        
-        # 计算重叠区域
-        high1 = max(pen1.start_price, pen1.end_price)
-        low1 = min(pen1.start_price, pen1.end_price)
-        high2 = max(pen2.start_price, pen2.end_price)
-        low2 = min(pen2.start_price, pen2.end_price)
-        high3 = max(pen3.start_price, pen3.end_price)
-        low3 = min(pen3.start_price, pen3.end_price)
-        
+
+        high1 = _pen_high(pen1, klines)
+        low1 = _pen_low(pen1, klines)
+        high2 = _pen_high(pen2, klines)
+        low2 = _pen_low(pen2, klines)
+        high3 = _pen_high(pen3, klines)
+        low3 = _pen_low(pen3, klines)
+
         # 检查是否有重叠
         overlap_high = min(high1, high2, high3)
         overlap_low = max(low1, low2, low3)
-        
+
         if overlap_high > overlap_low:
             zhongshus.append(ZhongShu(
                 start_index=pen1.start_index,
@@ -440,7 +624,7 @@ def identify_zhongshus(pens: List[Pen], level = DAY) -> List[ZhongShu]:
                 low=overlap_low,
                 level=1
             ))
-    
+
     return zhongshus
 
 
@@ -474,22 +658,18 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True, l
     # 2. 识别分型
     fractals = identify_fractals(processed_klines, klines)
     
-    # 3. 生成笔
+    # 3. 生成笔并校验（消除平行笔）
     pens = generate_new_pens(fractals, processed_klines)
-    
-    return{
-        "chan_klines": processed_klines,
-        "fractals": fractals,
-        "pens": pens
-    }
-    
+    pens = _validate_pens(pens, processed_klines)
+
     # 4. 生成段
-    segments = generate_segments(pens)
-    
+    segments = generate_segments(pens, processed_klines)
+
     # 5. 识别中枢
-    zhongshus = identify_zhongshus(pens, level)
-    
+    zhongshus = identify_zhongshus(pens, processed_klines, level)
+
     return {
+        "chan_klines": processed_klines,
         "fractals": fractals,
         "pens": pens,
         "segments": segments,

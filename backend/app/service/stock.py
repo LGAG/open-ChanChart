@@ -1,7 +1,7 @@
 from __future__ import annotations
 import baostock as bs
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from app.utils.database import engine, get_session
 from app.models.db_model import Stock, DayKline, WeekKline, MonthKline, YearKline, get_kline_model
@@ -19,6 +19,17 @@ def parse_time_to_minute(time_str: str) -> pd.Timestamp:
         return pd.Timestamp(dt_minute)
     except (ValueError, TypeError):
         return pd.NaT  # type: ignore[return-value]
+
+
+def _rs_to_dataframe(rs) -> pd.DataFrame:
+    """手动遍历 baostock 结果集，避免 get_data() 在新版 pandas 中因 DataFrame.append() 被移除而报错"""
+    rows: list[list] = []
+    fields = rs.fields if isinstance(rs.fields, list) else rs.fields.split(',') if rs.fields else []
+    while rs.next():
+        rows.append(rs.get_row_data())
+    if not rows:
+        return pd.DataFrame(columns=fields)
+    return pd.DataFrame(rows, columns=fields)
 
 
 def _upsert_dataframe(df: pd.DataFrame, model_class) -> None:
@@ -50,7 +61,7 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
                 return False
             print('query_history_k_data_plus respond error_code:' + rs.error_code)
             print('query_history_k_data_plus respond  error_msg:' + rs.error_msg)
-            df = rs.get_data()
+            df = _rs_to_dataframe(rs)
 
             df['volume'] = df['volume'].astype(str).replace({
                 '': '0',
@@ -71,7 +82,7 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
                 return False
             print('query_history_k_data_plus respond error_code:' + rs.error_code)
             print('query_history_k_data_plus respond  error_msg:' + rs.error_msg)
-            df = rs.get_data()
+            df = _rs_to_dataframe(rs)
 
             timedelta_val = timedelta(hours=1) if normalized == "60" else timedelta(minutes=30)
             period_label = 'hour' if normalized == "60" else 'half'
@@ -114,7 +125,7 @@ def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestam
             return False
         print('query_history_k_data_plus respond error_code:' + rs.error_code)
         print('query_history_k_data_plus respond  error_msg:' + rs.error_msg)
-        df = rs.get_data()
+        df = _rs_to_dataframe(rs)
 
         df['period'] = 'day'
         df['level'] = 6
@@ -141,26 +152,16 @@ def update_all_stock(day: str | None = None):
         print('login respond error_code:' + lg.error_code)
         print('login respond  error_msg:' + lg.error_msg)
         rs = bs.query_all_stock(day)
-        # 手动遍历结果集，避免 baostock get_data() 在新版 pandas 中
-        # 因 DataFrame.append() 被移除而报错
-        rows = []
-        fields = rs.fields if isinstance(rs.fields, list) else rs.fields.split(',') if rs.fields else []
-        while rs.next():
-            rows.append(rs.get_row_data())
-        if not rows:
+        df = _rs_to_dataframe(rs)
+        if df.empty:
             print("warning: baostock returned no stock data for", day, ", retrying with previous day")
-            # 当天数据可能未更新（非交易日），尝试前一天
-            from datetime import timedelta
             prev_day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
             rs = bs.query_all_stock(prev_day)
-            fields = rs.fields if isinstance(rs.fields, list) else rs.fields.split(',') if rs.fields else []
-            while rs.next():
-                rows.append(rs.get_row_data())
-            if not rows:
+            df = _rs_to_dataframe(rs)
+            if df.empty:
                 print("warning: baostock returned no stock data for", prev_day, "either")
                 return pd.DataFrame()
             day = prev_day
-        df = pd.DataFrame(rows, columns=fields)
         df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
         df['market'] = df['market'].str.lower()
         df = df.drop(columns=['code', 'tradeStatus'])
@@ -231,7 +232,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
                     if rs is None:
                         stock_results[display_name] = "查询失败"
                         continue
-                    df = rs.get_data()
+                    df = _rs_to_dataframe(rs)
                     if df.empty:
                         stock_results[display_name] = "无数据"
                         continue
@@ -253,7 +254,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
                         start_date=start_date, end_date=end_date,
                         frequency=freq_map[period], adjustflag="3"
                     )
-                    df = rs.get_data()
+                    df = _rs_to_dataframe(rs)
                     if df.empty:
                         stock_results[display_name] = "无数据"
                         continue
@@ -283,7 +284,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
                         start_date=start_date, end_date=end_date,
                         frequency="w", adjustflag="3"
                     )
-                    df = rs.get_data()
+                    df = _rs_to_dataframe(rs)
                     if df.empty:
                         stock_results[display_name] = "无数据"
                         continue
@@ -304,7 +305,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
                         start_date=start_date, end_date=end_date,
                         frequency="m", adjustflag="3"
                     )
-                    df = rs.get_data()
+                    df = _rs_to_dataframe(rs)
                     if df.empty:
                         stock_results[display_name] = "无数据"
                         continue
@@ -325,7 +326,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
                         start_date=start_date, end_date=end_date,
                         frequency="y", adjustflag="3"
                     )
-                    df = rs.get_data()
+                    df = _rs_to_dataframe(rs)
                     if df.empty:
                         stock_results[display_name] = "无数据"
                         continue
@@ -350,6 +351,45 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
         results[stock_key] = stock_results
 
     return results
+
+
+def get_kline_date_range(code: str, market: str, period: str) -> tuple[date | None, date | None]:
+    """查询数据库中某只股票某周期K线数据的日期范围
+
+    Returns:
+        (最早日期, 最晚日期) 元组，无数据时返回 (None, None)
+    """
+    normalized = PERIOD_MAP.get(period.lower(), period)
+    model_class = get_kline_model(normalized)
+    if model_class is None:
+        return (None, None)
+
+    with get_session() as session:
+        if hasattr(model_class, 'date'):
+            min_row = session.query(model_class.date).filter(
+                model_class.code == code, model_class.market == market
+            ).order_by(model_class.date.asc()).first()
+            max_row = session.query(model_class.date).filter(
+                model_class.code == code, model_class.market == market
+            ).order_by(model_class.date.desc()).first()
+        else:
+            min_row = session.query(model_class.start_time).filter(
+                model_class.code == code, model_class.market == market
+            ).order_by(model_class.start_time.asc()).first()
+            max_row = session.query(model_class.start_time).filter(
+                model_class.code == code, model_class.market == market
+            ).order_by(model_class.start_time.desc()).first()
+
+    if min_row is None or max_row is None:
+        return (None, None)
+
+    min_val = min_row[0]
+    max_val = max_row[0]
+    if hasattr(min_val, 'date'):
+        min_val = min_val.date()
+    if hasattr(max_val, 'date'):
+        max_val = max_val.date()
+    return (min_val, max_val)
 
 
 def query_stocks_list() -> list[dict]:

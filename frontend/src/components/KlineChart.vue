@@ -58,6 +58,25 @@ const updateChart = () => {
     })
   }
 
+  // Prepare segment lines
+  const segmentLineData = []
+  if (props.chanData.segments && props.chanData.pens) {
+    props.chanData.segments.forEach(seg => {
+      const startPen = props.chanData.pens[seg.start_index]
+      const endPen = props.chanData.pens[seg.end_index]
+      if (startPen && endPen) {
+        if (seg.direction === 'up') {
+          segmentLineData.push([startPen.start_date, props.chanData.chan_klines[startPen.start_index].low])
+          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.end_index].high])
+        } else {
+          segmentLineData.push([startPen.start_date, props.chanData.chan_klines[startPen.start_index].high])
+          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.end_index].low])
+        }
+        segmentLineData.push([null, null]) // Break line between segments
+      }
+    })
+  }
+
   // Prepare fractal markers
   const topFractals = []
   const bottomFractals = []
@@ -126,7 +145,7 @@ const updateChart = () => {
       }
     },
     legend: {
-      data: ['K线', '笔', '顶分型', '底分型'],
+      data: ['K线', '笔', '段', '顶分型', '底分型'],
       top: 30
     },
     grid: [
@@ -243,6 +262,22 @@ const updateChart = () => {
       },
       symbol: 'circle',
       symbolSize: 6,
+      connectNulls: false
+    })
+  }
+
+  // Add segment lines
+  if (segmentLineData.length > 0) {
+    option.series.push({
+      name: '段',
+      type: 'line',
+      data: segmentLineData,
+      lineStyle: {
+        color: '#FF6600',
+        width: 3
+      },
+      symbol: 'diamond',
+      symbolSize: 8,
       connectNulls: false
     })
   }
