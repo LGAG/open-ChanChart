@@ -417,9 +417,9 @@ def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[S
 
     简化规则：
     - 在向上段中，如果某根向下笔的最高点和最低点都低于前一根向下笔的最高点和最低点，
-      则向上段结束，该向下笔成为新向下段的第一根笔。
+      则向上段结束。前一根向下笔成为新向下段的第一根笔（破坏笔为第三根笔）。
     - 在向下段中，如果某根向上笔的最高点和最低点都高于前一根向上笔的最高点和最低点，
-      则向下段结束，该向上笔成为新向上段的第一根笔。
+      则向下段结束。前一根向上笔成为新向上段的第一根笔（破坏笔为第三根笔）。
 
     约束：
     - 每段至少包含3根笔
@@ -453,37 +453,47 @@ def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[S
 
         if seg_direction == "up" and pen.direction == "down":
             # 向上段中遇到向下笔：与同方向的前一根向下笔比较
-            prev_same_dir = None
+            prev_same_dir_idx = -1
             for j in range(i - 1, seg_start - 1, -1):
                 if pens[j].direction == "down":
-                    prev_same_dir = pens[j]
+                    prev_same_dir_idx = j
                     break
-            if prev_same_dir is not None:
+            if prev_same_dir_idx >= 0:
+                prev_same_dir = pens[prev_same_dir_idx]
                 if _pen_high(pen, klines) < _pen_high(prev_same_dir, klines) and \
                    _pen_low(pen, klines) < _pen_low(prev_same_dir, klines):
                     # 向下笔更低 → 向上段结束
-                    # 但必须保证当前段至少有 MIN_SEGMENT_PENS 根笔
-                    if pen_count >= MIN_SEGMENT_PENS:
-                        _close_segment(i - 1, "up")
-                        seg_start = i
+                    # 破坏笔(pen i)是新向下段的第三笔，前一同向笔(prev_same_dir)是第一笔
+                    # 所以新向下段从 prev_same_dir_idx 开始，向上段在 prev_same_dir_idx - 1 结束
+                    seg_end_idx = prev_same_dir_idx - 1
+                    # 但必须保证向上段至少有 MIN_SEGMENT_PENS 根笔
+                    up_seg_pen_count = seg_end_idx - seg_start + 1
+                    if up_seg_pen_count >= MIN_SEGMENT_PENS:
+                        _close_segment(seg_end_idx, "up")
+                        seg_start = prev_same_dir_idx
                         seg_direction = "down"
                         continue
 
         elif seg_direction == "down" and pen.direction == "up":
             # 向下段中遇到向上笔：与同方向的前一根向上笔比较
-            prev_same_dir = None
+            prev_same_dir_idx = -1
             for j in range(i - 1, seg_start - 1, -1):
                 if pens[j].direction == "up":
-                    prev_same_dir = pens[j]
+                    prev_same_dir_idx = j
                     break
-            if prev_same_dir is not None:
+            if prev_same_dir_idx >= 0:
+                prev_same_dir = pens[prev_same_dir_idx]
                 if _pen_high(pen, klines) > _pen_high(prev_same_dir, klines) and \
                    _pen_low(pen, klines) > _pen_low(prev_same_dir, klines):
                     # 向上笔更高 → 向下段结束
-                    # 但必须保证当前段至少有 MIN_SEGMENT_PENS 根笔
-                    if pen_count >= MIN_SEGMENT_PENS:
-                        _close_segment(i - 1, "down")
-                        seg_start = i
+                    # 破坏笔(pen i)是新向上段的第三笔，前一同向笔(prev_same_dir)是第一笔
+                    # 所以新向上段从 prev_same_dir_idx 开始，向下段在 prev_same_dir_idx - 1 结束
+                    seg_end_idx = prev_same_dir_idx - 1
+                    # 但必须保证向下段至少有 MIN_SEGMENT_PENS 根笔
+                    down_seg_pen_count = seg_end_idx - seg_start + 1
+                    if down_seg_pen_count >= MIN_SEGMENT_PENS:
+                        _close_segment(seg_end_idx, "down")
+                        seg_start = prev_same_dir_idx
                         seg_direction = "up"
                         continue
 
