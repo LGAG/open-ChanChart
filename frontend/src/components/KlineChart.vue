@@ -1,6 +1,28 @@
 <template>
   <div class="kline-chart" :class="{ 'is-fullscreen': isFullscreen }">
-    <div class="chart-actions">
+    <div class="chart-toolbar">
+      <div class="chan-toggles">
+        <label class="toggle-item">
+          <input type="checkbox" v-model="showPens" @change="updateChart" />
+          <span class="toggle-indicator" style="background: #0000FF;"></span>
+          笔
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" v-model="showFractals" @change="updateChart" />
+          <span class="toggle-indicator" style="background: linear-gradient(135deg, #FF0000 50%, #00FF00 50%);"></span>
+          分型
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" v-model="showSegments" @change="updateChart" />
+          <span class="toggle-indicator" style="background: #FF6600;"></span>
+          段
+        </label>
+        <label class="toggle-item">
+          <input type="checkbox" v-model="showZhongshu" @change="updateChart" />
+          <span class="toggle-indicator" style="background: repeating-linear-gradient(90deg, rgba(255,0,0,0.3) 0 4px, transparent 4px 8px); border: 1px solid rgba(0,0,0,0.15);"></span>
+          中枢
+        </label>
+      </div>
       <button class="fullscreen-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏展示'">
         <svg v-if="!isFullscreen" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
           <path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 4h-4v2h6v-6h-2v4z"/>
@@ -32,6 +54,12 @@ const props = defineProps({
 const chartRef = ref(null)
 let chartInstance = null
 const isFullscreen = ref(false)
+
+// Visibility toggles for Chan theory structures
+const showPens = ref(true)
+const showFractals = ref(true)
+const showSegments = ref(true)
+const showZhongshu = ref(true)
 
 const toggleFullscreen = () => {
   isFullscreen.value = !isFullscreen.value
@@ -71,7 +99,7 @@ const updateChart = () => {
 
   // Prepare Chan theory data - pen lines as segments
   const penLineData = []
-  if (props.chanData.pens) {
+  if (showPens.value && props.chanData.pens) {
     props.chanData.pens.forEach(pen => {
       props.chanData.chan_klines[pen.start_index].start
       if (pen.direction === 'up') {
@@ -85,21 +113,29 @@ const updateChart = () => {
     })
   }
 
-  // Prepare segment lines
+  // Prepare segment lines - connected as a continuous polyline
   const segmentLineData = []
-  if (props.chanData.segments && props.chanData.pens) {
-    props.chanData.segments.forEach(seg => {
+  if (showSegments.value && props.chanData.segments && props.chanData.pens) {
+    props.chanData.segments.forEach((seg, i) => {
       const startPen = props.chanData.pens[seg.start_index]
       const endPen = props.chanData.pens[seg.end_index]
       if (startPen && endPen) {
+        const startX = startPen.start_date
+        const endX = endPen.end_date
+        let startY, endY
         if (seg.direction === 'up') {
-          segmentLineData.push([startPen.start_date, props.chanData.chan_klines[startPen.start_index].low])
-          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.start_index].high])
+          startY = props.chanData.chan_klines[startPen.start_index].low
+          endY = props.chanData.chan_klines[endPen.end_index].high
         } else {
-          segmentLineData.push([startPen.start_date, props.chanData.chan_klines[startPen.start_index].high])
-          segmentLineData.push([endPen.end_date, props.chanData.chan_klines[endPen.start_index].low])
+          startY = props.chanData.chan_klines[startPen.start_index].high
+          endY = props.chanData.chan_klines[endPen.end_index].low
         }
-        segmentLineData.push([null, null]) // Break line between segments
+        // First segment: push start point
+        if (i === 0) {
+          segmentLineData.push([startX, startY])
+        }
+        // Always push end point — connects to previous segment
+        segmentLineData.push([endX, endY])
       }
     })
   }
@@ -107,7 +143,7 @@ const updateChart = () => {
   // Prepare fractal markers
   const topFractals = []
   const bottomFractals = []
-  if (props.chanData.fractals) {
+  if (showFractals.value && props.chanData.fractals) {
     props.chanData.fractals.forEach(fractal => {
       if (fractal.type === 'top') {
         topFractals.push([fractal.date, props.chanData.chan_klines[fractal.index].high])
@@ -119,7 +155,7 @@ const updateChart = () => {
 
   // Prepare zhongshu rectangles
   const zhongshuSeries = []
-  if (props.chanData.zhongshus) {
+  if (showZhongshu.value && props.chanData.zhongshus) {
     props.chanData.zhongshus.forEach((zs, index) => {
       const startKline = props.klineData[zs.start_index]
       const endKline = props.klineData[zs.end_index]
@@ -160,6 +196,15 @@ const updateChart = () => {
     })
   }
 
+  // Build legend entries based on visibility
+  const legendData = ['K线']
+  if (showPens.value) legendData.push('笔')
+  if (showSegments.value) legendData.push('段')
+  if (showFractals.value) {
+    legendData.push('顶分型')
+    legendData.push('底分型')
+  }
+
   const option = {
     title: {
       text: '缠论K线图',
@@ -172,7 +217,7 @@ const updateChart = () => {
       }
     },
     legend: {
-      data: ['K线', '笔', '段', '顶分型', '底分型'],
+      data: legendData,
       top: 30
     },
     grid: [
@@ -293,7 +338,7 @@ const updateChart = () => {
     })
   }
 
-  // Add segment lines
+  // Add segment lines (connected polyline)
   if (segmentLineData.length > 0) {
     option.series.push({
       name: '段',
@@ -375,16 +420,43 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.chart-container {
-  width: 100%;
-  height: 600px;
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
 }
 
-.chart-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 10;
+.chan-toggles {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #606266;
+  user-select: none;
+}
+
+.toggle-item input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  width: 15px;
+  height: 15px;
+  accent-color: #409eff;
+}
+
+.toggle-indicator {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .fullscreen-btn {
@@ -400,11 +472,17 @@ onBeforeUnmount(() => {
   color: #606266;
   cursor: pointer;
   transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 .fullscreen-btn:hover {
   color: #409eff;
   border-color: #409eff;
+}
+
+.chart-container {
+  width: 100%;
+  height: 600px;
 }
 
 /* Fullscreen overlay styles */
@@ -416,16 +494,15 @@ onBeforeUnmount(() => {
   bottom: 0;
   z-index: 9999;
   background: #fff;
-  padding: 0;
+  padding: 0 16px;
 }
 
 .kline-chart.is-fullscreen .chart-container {
-  height: 100%;
+  height: calc(100% - 48px);
 }
 
-.kline-chart.is-fullscreen .chart-actions {
-  top: 12px;
-  right: 12px;
+.kline-chart.is-fullscreen .chart-toolbar {
+  padding: 8px 0;
 }
 
 .kline-chart.is-fullscreen .fullscreen-btn {
