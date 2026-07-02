@@ -34,11 +34,6 @@
         </div>
 
         <div class="control-item">
-          <label>包含关系处理：</label>
-          <el-switch v-model="processInclude" @change="loadData" />
-        </div>
-
-        <div class="control-item">
           <el-button type="primary" @click="loadData" :loading="loading">
             刷新数据
           </el-button>
@@ -102,7 +97,6 @@ interface Stock {
 
 const currentStock = ref<Stock | null>(null)
 const period = ref('daily')
-const processInclude = ref(true)
 const loading = ref(false)
 const refreshingList = ref(false)
 const updatingKline = ref(false)
@@ -181,7 +175,6 @@ const loadData = async () => {
       code: currentStock.value.code,
       market: currentStock.value.market,
       period: period.value,
-      process_include: processInclude.value,
       start_date: dateRange.value[0],
       end_date: dateRange.value[1]
     }

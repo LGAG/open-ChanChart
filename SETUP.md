@@ -129,8 +129,7 @@ VITE_API_BASE_URL=http://localhost:8000
 1. **选择股票**：在搜索框中输入股票代码或名称（如 "600519" 或 "茅台"）
 2. **选择周期**：支持日K（daily）、1小时（60F）、30分钟（30F）
 3. **选择时间范围**：使用日期选择器指定起止日期
-4. **配置参数**：开关"包含关系处理"（默认开启）
-5. **刷新数据**：点击"刷新数据"按钮加载图表
+4. **刷新数据**：点击"刷新数据"按钮加载图表
 
 ## 功能说明
 
@@ -183,7 +182,7 @@ POST /api/stock/update?code={code}&market={market}&periods={periods}&start_date=
 
 ### 缠论分析
 ```
-GET /api/chan/analysis?code={code}&market={market}&period={period}&process_include={bool}&start_date={date}&end_date={date}
+GET /api/chan/analysis?code={code}&market={market}&period={period}&start_date={date}&end_date={date}
 ```
 
 ## 数据流

@@ -14,7 +14,6 @@ async def get_chan_analysis(
     code: str = Query(..., description="股票代码"),
     market: str = Query(default="sh", description="市场类型"),
     period: str = Query(default="D", description="周期 D/30F/5F"),
-    process_include: bool = Query(default=True, description="是否处理包含关系"),
     start_date: str = Query("2025-01-01", description="开始日期 YYYY-MM-DD"),
     end_date: str = Query("2026-02-26", description="结束日期 YYYY-MM-DD")
 ):
@@ -39,7 +38,7 @@ async def get_chan_analysis(
     klines = [KlineData(**kline) for kline in klines_data]
     
     # 3. 计算缠论数据
-    chan_result = calculate_chan_data(klines, process_include=process_include)
+    chan_result = calculate_chan_data(klines)
     
     return {
         "code": 200,

@@ -649,13 +649,12 @@ def identify_zhongshus(pens: List[Pen], klines: List[ClassicChanKline], level = 
     return zhongshus
 
 
-def calculate_chan_data(klines: List[KlineData], process_include: bool = True, level = DAY) -> dict:
+def calculate_chan_data(klines: List[KlineData], level = DAY) -> dict:
     """
     计算缠论数据
 
     Args:
         klines: K线数据列表
-        process_include: 是否处理包含关系
 
     Returns:
         包含分型、笔、段、中枢的字典
@@ -669,13 +668,7 @@ def calculate_chan_data(klines: List[KlineData], process_include: bool = True, l
         }
 
     # 1. 处理包含关系（始终输出 List[ClassicChanKline]）
-    if process_include:
-        processed_klines: List[ClassicChanKline] = process_inclusion(klines)
-    else:
-        processed_klines = [
-            ClassicChanKline(index=i, start=i, end=i, high=k.high, low=k.low)
-            for i, k in enumerate(klines)
-        ]
+    processed_klines: List[ClassicChanKline] = process_inclusion(klines)
     print(f"processed_klines: \n")
     for kline in processed_klines:
         print(kline)

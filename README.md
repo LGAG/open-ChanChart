@@ -243,7 +243,6 @@ backend/
   - `code`（必填）：股票代码
   - `market`（可选，默认 `sh`）：市场类型
   - `period`（可选，默认 `D`）：周期，可选 `D`、`60F`、`30F`
-  - `process_include`（可选，默认 `true`）：是否处理包含关系
   - `start_date`（可选，格式 `YYYY-MM-DD`）：开始日期
   - `end_date`（可选，格式 `YYYY-MM-DD`）：结束日期
 - **响应示例**:
