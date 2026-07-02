@@ -8,6 +8,24 @@ from app.models.db_model import Stock, DayKline, WeekKline, MonthKline, YearKlin
 from app.config.config import PERIOD_MAP
 
 
+def validate_stock(code: str, market: str, name: str | None = None) -> bool:
+    """验证股票是否存在于数据库中，name 不为空时同时校验名称
+
+    Args:
+        code: 股票代码
+        market: 市场类型 sh/sz
+        name: 股票名称（可选），传入时用于区分同代码不同名称的股票
+
+    Returns:
+        True 如果股票存在（且 name 匹配），否则 False
+    """
+    with get_session() as session:
+        query = session.query(Stock).filter(Stock.code == code, Stock.market == market)
+        if name is not None:
+            query = query.filter(Stock.name == name)
+        return session.query(query.exists()).scalar() is True
+
+
 def parse_time_to_minute(time_str: str) -> pd.Timestamp:
     if pd.isna(time_str) or time_str == "":
         return pd.NaT  # type: ignore[return-value]
@@ -176,7 +194,7 @@ def update_all_stock(day: str | None = None):
         bs.logout()
 
 
-def update_kline_data(code: str | None = None, market: str = "sh", periods: list[str] | None = None, start_date: str | None = None, end_date: str | None = None) -> dict:
+def update_kline_data(code: str | None = None, market: str = "sh", periods: list[str] | None = None, start_date: str | None = None, end_date: str | None = None, name: str | None = None) -> dict:
     """批量更新K线数据到数据库
 
     Args:
@@ -185,6 +203,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
         periods: 周期列表，如 ["day", "60F", "30F", "5F"]，为 None 时更新所有周期
         start_date: 开始日期 YYYY-MM-DD，为 None 时从默认日期开始
         end_date: 结束日期 YYYY-MM-DD，为 None 时到今天
+        name: 股票名称（可选），传入时用于区分同代码不同名称的股票
 
     Returns:
         更新结果统计
@@ -205,7 +224,17 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
 
     # 获取股票列表
     if code is not None:
-        stocks = [{"code": code, "market": market}]
+        if name is not None:
+            # 使用 code + name + market 精确匹配，避免同代码不同股票冲突
+            with get_session() as session:
+                row = session.query(Stock.code, Stock.market, Stock.name).filter(
+                    Stock.code == code, Stock.market == market, Stock.name == name
+                ).first()
+                if row is None:
+                    return {f"{market}.{code}": {"错误": f"未找到股票 {code}({name})"}}
+                stocks = [{"code": row.code, "market": row.market}]
+        else:
+            stocks = [{"code": code, "market": market}]
     else:
         with get_session() as session:
             rows = session.query(Stock.code, Stock.market).all()
@@ -353,12 +382,23 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
     return results
 
 
-def get_kline_date_range(code: str, market: str, period: str) -> tuple[date | None, date | None]:
+def get_kline_date_range(code: str, market: str, period: str, name: str | None = None) -> tuple[date | None, date | None]:
     """查询数据库中某只股票某周期K线数据的日期范围
+
+    Args:
+        code: 股票代码
+        market: 市场类型 sh/sz
+        period: 周期
+        name: 股票名称（可选），传入时用于区分同代码不同名称的股票
 
     Returns:
         (最早日期, 最晚日期) 元组，无数据时返回 (None, None)
     """
+    # 如果提供了 name，先校验股票是否存在
+    if name is not None:
+        if not validate_stock(code, market, name):
+            print(f"股票 {code}({name}) 在 {market} 市场中未找到")
+            return (None, None)
     normalized = PERIOD_MAP.get(period.lower(), period)
     model_class = get_kline_model(normalized)
     if model_class is None:
@@ -399,7 +439,7 @@ def query_stocks_list() -> list[dict]:
         return [{"name": s.name, "code": s.code, "market": s.market} for s in stocks]
 
 
-def get_stock_data_database(code: str, market: str, period: str, start_timestamp: str, end_timestamp: str) -> pd.DataFrame | None:
+def get_stock_data_database(code: str, market: str, period: str, start_timestamp: str, end_timestamp: str, name: str | None = None) -> pd.DataFrame | None:
     """从数据库读取K线数据
 
     Args:
@@ -408,10 +448,16 @@ def get_stock_data_database(code: str, market: str, period: str, start_timestamp
         period: 周期，如 "d", "60", "30", "5", "w", "m", "y"
         start_timestamp: 开始日期/时间 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS
         end_timestamp: 结束日期/时间 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS
+        name: 股票名称（可选），传入时用于区分同代码不同名称的股票
 
     Returns:
         DataFrame 或 None（周期不支持时）
     """
+    # 如果提供了 name，先校验股票是否存在
+    if name is not None:
+        if not validate_stock(code, market, name):
+            print(f"股票 {code}({name}) 在 {market} 市场中未找到")
+            return None
     normalized = PERIOD_MAP.get(period.lower(), period)
     model_class = get_kline_model(normalized)
     if model_class is None:

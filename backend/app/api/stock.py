@@ -39,6 +39,7 @@ async def search_stocks_api(
 @router.get("/kline", response_model=dict)
 async def get_kline_data(
     code: str = Query(..., description="股票代码"),
+    name: Optional[str] = Query(None, description="股票名称"),
     market: str = Query(default="sh", description="市场类型"),
     period: str = Query(default="daily", description="周期 D/30F/5F"),
     start_date: str = Query(default="2025-01-01", description="开始日期 YYYY-MM-DD"),
@@ -48,10 +49,10 @@ async def get_kline_data(
     获取股票K线数据
     优先从数据库读取；如果数据库数据不覆盖请求的日期范围，则先更新数据库再读取。
     """
-    print(f"code:{code}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
+    print(f"code:{code}, name:{name}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
 
     # 检查数据库中该股票该周期的日期覆盖范围
-    db_min, db_max = get_kline_date_range(code, market, period)
+    db_min, db_max = get_kline_date_range(code, market, period, name=name)
     request_start = datetime.strptime(start_date[:10], "%Y-%m-%d").date()
     request_end = datetime.strptime(end_date[:10], "%Y-%m-%d").date()
 
@@ -81,10 +82,10 @@ async def get_kline_data(
             # 只缺前期数据，更新到数据库最早日期
             update_end = db_min.strftime("%Y-%m-%d")
         print(f"从baostock更新 {code}({market}) {period} 数据：{update_start} ~ {update_end}")
-        update_kline_data(code=code, market=market, periods=[period], start_date=update_start, end_date=update_end)
+        update_kline_data(code=code, market=market, periods=[period], start_date=update_start, end_date=update_end, name=name)
 
     # 从数据库读取（更新后的完整数据）
-    df = get_stock_data_database(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
+    df = get_stock_data_database(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date, name=name)
 
     if df is None or df.empty:
         # 数据库仍无数据，尝试直接从baostock获取（不写库的兜底）
@@ -148,6 +149,7 @@ async def refresh_stock_list():
 @router.post("/update", response_model=dict)
 async def update_data(
     code: Optional[str] = Query(None, description="股票代码，不填则更新所有股票"),
+    name: Optional[str] = Query(None, description="股票名称"),
     market: str = Query(default="sh", description="市场类型 sh/sz"),
     periods: Optional[str] = Query(None, description="周期列表，逗号分隔，如 day,60F,30F,5F,week,month,year。不填则更新所有周期"),
     start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD，不填则默认一年前"),
@@ -164,7 +166,8 @@ async def update_data(
         market=market,
         periods=period_list,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        name=name
     )
     return {
         "code": 200,

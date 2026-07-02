@@ -13,9 +13,9 @@
     >
       <el-option
         v-for="item in stockList"
-        :key="item.code"
+        :key="item.code + '|' + item.name"
         :label="`${item.code} - ${item.name}`"
-        :value="item.code"
+        :value="item.code + '|' + item.name"
       >
         <span>{{ item.code }}</span>
         <span style="float: right; color: #8492a6; font-size: 13px">{{ item.name }}</span>
@@ -58,7 +58,7 @@ const handleSearch = async (query) => {
 }
 
 const handleChange = (value) => {
-  const stock = stockList.value.find(s => s.code === value)
+  const stock = stockList.value.find(s => s.code + '|' + s.name === value)
   if (stock) {
     emit('change', stock)
   }

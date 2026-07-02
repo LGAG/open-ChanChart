@@ -142,6 +142,7 @@ const handleUpdateKline = async () => {
   try {
     const params: Record<string, string> = {
       code: currentStock.value.code,
+      name: currentStock.value.name,
       market: currentStock.value.market
     }
     if (dateRange.value && dateRange.value[0]) {
@@ -173,6 +174,7 @@ const loadData = async () => {
     // 拼接请求参数（新增时间范围）
     const params = {
       code: currentStock.value.code,
+      name: currentStock.value.name,
       market: currentStock.value.market,
       period: period.value,
       start_date: dateRange.value[0],
