@@ -11,6 +11,13 @@ from app.core.chan_helpers import (
     pen_high,
     pen_low,
     validate_segments,
+    validate_segments_v1,
+    _build_char_sequence,
+    _process_char_sequence_inclusion,
+    _has_gap,
+    _identify_char_fractals,
+    CharElement,
+    _find_overlaps_break,
 )
 
 
@@ -294,20 +301,19 @@ def generate_new_pens_v1(fractals: List[Fractal], klines: List[ClassicChanKline]
     return pens
 
 
-def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[Segment]:
+def generate_segments_v1(pens: List[Pen], klines: List[ClassicChanKline]) -> List[Segment]:
     """
-    生成段
+    [v1备份] 生成段（严格满足缠论定义）
 
-    简化规则：
-    - 在向上段中，如果某根向下笔的最高点和最低点都低于前一根向下笔的最高点和最低点，
-      则向上段结束。前一根向下笔成为新向下段的第一根笔（破坏笔为第三根笔）。
-    - 在向下段中，如果某根向上笔的最高点和最低点都高于前一根向上笔的最高点和最低点，
-      则向下段结束。前一根向上笔成为新向上段的第一根笔（破坏笔为第三根笔）。
+    规则：
+    - 每段至少3根笔，且笔数为奇数
+    - 向上段以向上笔起始并以向上笔结束
+    - 向下段以向下笔起始并以向下笔结束
+    - 相邻段方向交替
 
-    约束：
-    - 每段至少包含3根笔
-    - 不允许平行段（相邻段方向必须交替）
-    - 向上段终点高于起点，向下段终点低于起点
+    断段条件：
+    - 向上段中，向下笔比前一同向向下笔更低（high和low都更低）→ 向上段结束
+    - 向下段中，向上笔比前一同向向上笔更高（high和low都更高）→ 向下段结束
     """
     if len(pens) < 3:
         return []
@@ -318,8 +324,8 @@ def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[S
     seg_start = 0
     seg_direction = pens[0].direction
 
-    def _close_segment(end_idx: int, direction: str) -> None:
-        """将当前段收尾并加入列表"""
+    def _close_segment(end_idx: int) -> None:
+        """将当前段收尾并加入列表，方向取自 seg_direction（即起始笔方向）"""
         top = max(pen_high(pens[i], klines) for i in range(seg_start, end_idx + 1))
         bottom = min(pen_low(pens[i], klines) for i in range(seg_start, end_idx + 1))
         segments.append(Segment(
@@ -327,12 +333,11 @@ def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[S
             end_index=end_idx,
             top=top,
             bottom=bottom,
-            direction=direction,
+            direction=seg_direction,
         ))
 
     for i in range(1, len(pens)):
         pen = pens[i]
-        pen_count = i - seg_start  # 当前段内笔数（不含当前笔 i）
 
         if seg_direction == "up" and pen.direction == "down":
             # 向上段中遇到向下笔：与同方向的前一根向下笔比较
@@ -345,14 +350,10 @@ def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[S
                 prev_same_dir = pens[prev_same_dir_idx]
                 if pen_high(pen, klines) < pen_high(prev_same_dir, klines) and \
                    pen_low(pen, klines) < pen_low(prev_same_dir, klines):
-                    # 向下笔更低 → 向上段结束
-                    # 破坏笔(pen i)是新向下段的第三笔，前一同向笔(prev_same_dir)是第一笔
-                    # 所以新向下段从 prev_same_dir_idx 开始，向上段在 prev_same_dir_idx - 1 结束
                     seg_end_idx = prev_same_dir_idx - 1
-                    # 但必须保证向上段至少有 MIN_SEGMENT_PENS 根笔
-                    up_seg_pen_count = seg_end_idx - seg_start + 1
-                    if up_seg_pen_count >= MIN_SEGMENT_PENS:
-                        _close_segment(seg_end_idx, "up")
+                    pen_count = seg_end_idx - seg_start + 1
+                    if pen_count >= MIN_SEGMENT_PENS and pen_count % 2 == 1:
+                        _close_segment(seg_end_idx)
                         seg_start = prev_same_dir_idx
                         seg_direction = "down"
                         continue
@@ -368,22 +369,115 @@ def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[S
                 prev_same_dir = pens[prev_same_dir_idx]
                 if pen_high(pen, klines) > pen_high(prev_same_dir, klines) and \
                    pen_low(pen, klines) > pen_low(prev_same_dir, klines):
-                    # 向上笔更高 → 向下段结束
-                    # 破坏笔(pen i)是新向上段的第三笔，前一同向笔(prev_same_dir)是第一笔
-                    # 所以新向上段从 prev_same_dir_idx 开始，向下段在 prev_same_dir_idx - 1 结束
                     seg_end_idx = prev_same_dir_idx - 1
-                    # 但必须保证向下段至少有 MIN_SEGMENT_PENS 根笔
-                    down_seg_pen_count = seg_end_idx - seg_start + 1
-                    if down_seg_pen_count >= MIN_SEGMENT_PENS:
-                        _close_segment(seg_end_idx, "down")
+                    pen_count = seg_end_idx - seg_start + 1
+                    if pen_count >= MIN_SEGMENT_PENS and pen_count % 2 == 1:
+                        _close_segment(seg_end_idx)
                         seg_start = prev_same_dir_idx
                         seg_direction = "up"
                         continue
 
-    # 收尾最后一段（仅当剩余笔数 >= MIN_SEGMENT_PENS 时才独立成段）
+    # 收尾最后一段
     remaining_pens = len(pens) - seg_start
     if remaining_pens >= MIN_SEGMENT_PENS:
-        _close_segment(len(pens) - 1, seg_direction)
+        if remaining_pens % 2 == 1:
+            _close_segment(len(pens) - 1)
+        else:
+            _close_segment(len(pens) - 2)
+    elif remaining_pens > 0 and segments:
+        segments[-1].end_index = len(pens) - 1
+        segments[-1].top = max(
+            segments[-1].top,
+            max(pen_high(pens[i], klines) for i in range(seg_start, len(pens)))
+        )
+        segments[-1].bottom = min(
+            segments[-1].bottom,
+            min(pen_low(pens[i], klines) for i in range(seg_start, len(pens)))
+        )
+
+    segments = validate_segments_v1(segments, pens, klines, MIN_SEGMENT_PENS)
+
+    return segments
+
+
+def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[Segment]:
+    """
+    生成段（v2 — 特征序列法）
+
+    算法步骤：
+    1. 构建当前段的特征序列（与段方向相反的笔）
+    2. 对特征序列做包含处理 → 标准特征序列
+    3. 识别分型（向上段找顶分型，向下段找底分型）
+    4. 找到分型后：
+       - 第一种情况（无缺口）：段在分型极值点结束
+       - 第二种情况（有缺口）：构造反向验证序列，出现分型则段结束
+    5. 段结束后新段开始，方向反转
+
+    规则：
+    - 每段至少3根笔，且笔数为奇数
+    - 向上段以向上笔起始并以向上笔结束
+    - 向下段以向下笔起始并以向下笔结束
+    - 相邻段方向交替
+    """
+    if len(pens) < 3:
+        return []
+
+    MIN_SEGMENT_PENS = 3
+    segments: List[Segment] = []
+    seg_start = 0
+    seg_direction = pens[0].direction
+
+    def _close_segment(end_idx: int) -> None:
+        """将当前段收尾并加入列表"""
+        top = max(pen_high(pens[i], klines) for i in range(seg_start, end_idx + 1))
+        bottom = min(pen_low(pens[i], klines) for i in range(seg_start, end_idx + 1))
+        segments.append(Segment(
+            start_index=seg_start,
+            end_index=end_idx,
+            top=top,
+            bottom=bottom,
+            direction=seg_direction,
+        ))
+
+    # 逐段处理：从 seg_start 开始扫描，直到找到段结束点
+    while seg_start < len(pens):
+        seg_direction = pens[seg_start].direction
+
+        # 至少需要3根笔才能成段
+        if len(pens) - seg_start < MIN_SEGMENT_PENS:
+            break
+
+        # ---- 步骤1：检查同向笔重合约束 ----
+        # 向上段中 Si 与 Si+1 必须有重合区间，否则段终结于 Si
+        # 向下段中 Xi 与 Xi+1 必须有重合区间，否则段终结于 Xi
+        overlap_break_idx = _find_overlaps_break(pens, klines, seg_start, seg_direction)
+
+        # ---- 步骤2-4：特征序列法寻找段结束点 ----
+        char_end_idx = _find_segment_end(pens, klines, seg_start, seg_direction)
+
+        # 取两者中更早的断点
+        if overlap_break_idx is not None and char_end_idx is not None:
+            seg_end_idx = min(overlap_break_idx, char_end_idx)
+        elif overlap_break_idx is not None:
+            seg_end_idx = overlap_break_idx
+        elif char_end_idx is not None:
+            seg_end_idx = char_end_idx
+        else:
+            # 未找到段结束点，剩余笔全部作为尾部
+            break
+
+        # ---- 步骤4：关闭当前段 ----
+        _close_segment(seg_end_idx)
+        seg_start = seg_end_idx + 1
+
+    # ---- 步骤7：尾部段处理 ----
+    remaining_pens = len(pens) - seg_start
+    if remaining_pens >= MIN_SEGMENT_PENS:
+        if remaining_pens % 2 == 1:
+            _close_segment(len(pens) - 1)
+        else:
+            # 偶数笔截断1笔使其奇数
+            _close_segment(len(pens) - 2)
     elif remaining_pens > 0 and segments:
         # 不足3笔的尾部合并到前一段
         segments[-1].end_index = len(pens) - 1
@@ -395,12 +489,128 @@ def generate_segments(pens: List[Pen], klines: List[ClassicChanKline]) -> List[S
             segments[-1].bottom,
             min(pen_low(pens[i], klines) for i in range(seg_start, len(pens)))
         )
-    # 若尾部不足3笔且无前一段可合并，则丢弃尾部（无法构成有效段）
 
-    # 后处理校验：消除不合规的段
+    # ---- 步骤8：后处理校验 ----
     segments = validate_segments(segments, pens, klines, MIN_SEGMENT_PENS)
 
     return segments
+
+
+def _find_extremum_pen_idx(elem: "CharElement", extremum_type: str,
+                           pens: List[Pen], klines: List[ClassicChanKline]) -> int:
+    """
+    在特征序列元素的 pen_indices 中找到极值笔的索引。
+
+    经包含处理后，一个 CharElement 可能由多个原始笔合并而来，
+    需要在这些笔中找到实际产生极值的笔。
+
+    Args:
+        elem: 特征序列元素
+        extremum_type: "high" 找最高点对应的笔，"low" 找最低点对应的笔
+        pens: 笔列表
+        klines: 缠论K线列表
+
+    Returns:
+        极值笔在 pens 列表中的索引
+    """
+    if len(elem.pen_indices) == 1:
+        return elem.pen_indices[0]
+
+    best_idx = elem.pen_indices[0]
+    if extremum_type == "high":
+        best_val = pen_high(pens[best_idx], klines)
+        for idx in elem.pen_indices[1:]:
+            val = pen_high(pens[idx], klines)
+            if val > best_val:
+                best_val = val
+                best_idx = idx
+    else:  # "low"
+        best_val = pen_low(pens[best_idx], klines)
+        for idx in elem.pen_indices[1:]:
+            val = pen_low(pens[idx], klines)
+            if val < best_val:
+                best_val = val
+                best_idx = idx
+
+    return best_idx
+
+
+def _find_segment_end(pens: List[Pen], klines: List[ClassicChanKline],
+                      seg_start: int, seg_direction: str) -> int | None:
+    """
+    从 seg_start 开始，用特征序列法寻找当前段的结束笔索引。
+
+    向上段：在特征序列（向下笔）中找顶分型，在第二元素的极值笔（最高点）处划分
+    向下段：在特征序列（向上笔）中找底分型，在第二元素的极值笔（最低点）处划分
+
+    包含处理后，标准特征序列的一个元素可能由多个原始笔合并而来，
+    因此需要在第二元素的 pen_indices 中找到极值笔，而不是直接取 pen_index。
+
+    找到分型后：
+    - 第一种情况（第一元素和第二元素之间无缺口）：段在极值笔处结束
+    - 第二种情况（有缺口）：需要构造反向验证序列，出现分型才确认结束
+
+    Returns:
+        段结束笔索引（包含在该段内），若未找到返回 None
+    """
+    # 构建特征序列
+    char_seq = _build_char_sequence(pens, seg_start, seg_direction, klines)
+    if len(char_seq) < 3:
+        # 特征序列不足3个元素，无法形成分型
+        return None
+
+    # 包含处理 → 标准特征序列（传入段方向作为先验趋势方向）
+    std_seq = _process_char_sequence_inclusion(char_seq, seg_direction)
+    if len(std_seq) < 3:
+        return None
+
+    # 识别分型
+    target_fractal_type = "top" if seg_direction == "up" else "bottom"
+    char_fractals = _identify_char_fractals(std_seq)
+
+    for fractal in char_fractals:
+        if fractal.type != target_fractal_type:
+            continue
+
+        # 在第二元素的 pen_indices 中找到极值笔
+        # 向上段顶分型 → 找最高点对应的笔
+        # 向下段底分型 → 找最低点对应的笔
+        extremum_type = "high" if seg_direction == "up" else "low"
+        extremum_pen_idx = _find_extremum_pen_idx(fractal.second_elem, extremum_type, pens, klines)
+
+        # 判断第一元素和第二元素之间是否有缺口
+        has_gap = _has_gap(fractal.first_elem, fractal.second_elem)
+
+        if not has_gap:
+            # ---- 第一种情况：无缺口，段在极值笔处结束 ----
+            # 段结束笔索引 = 极值笔的前一笔（因为段以同向笔结束）
+            end_idx = extremum_pen_idx - 1
+            pen_count = end_idx - seg_start + 1
+            if pen_count >= 3 and pen_count % 2 == 1:
+                return end_idx
+        else:
+            # ---- 第二种情况：有缺口，需要验证 ----
+            # 从极值笔开始，构造反向段的特征序列
+            reverse_dir = "down" if seg_direction == "up" else "up"
+            verify_char_seq = _build_char_sequence(pens, extremum_pen_idx, reverse_dir, klines)
+            if len(verify_char_seq) < 3:
+                # 验证序列不足以形成分型，当前段继续
+                continue
+
+            verify_std_seq = _process_char_sequence_inclusion(verify_char_seq, reverse_dir)
+            if len(verify_std_seq) < 3:
+                continue
+
+            verify_fractals = _identify_char_fractals(verify_std_seq)
+            # 反向段只需出现任意分型即可确认（不区分第一/二种情况）
+            if verify_fractals:
+                end_idx = extremum_pen_idx - 1
+                pen_count = end_idx - seg_start + 1
+                if pen_count >= 3 and pen_count % 2 == 1:
+                    return end_idx
+            # 验证序列中未出现分型，当前段继续，尝试下一个分型
+
+    return None
 
 
 def identify_zhongshus(pens: List[Pen], klines: List[ClassicChanKline], level = DAY) -> List[ZhongShu]:

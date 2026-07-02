@@ -218,83 +218,437 @@ def pen_low(pen: Pen, klines: List[ClassicChanKline]) -> float:
     return klines[pen.end_index].low
 
 
-def validate_segments(
+# ---------------------------------------------------------------------------
+# 特征序列相关辅助数据结构
+# ---------------------------------------------------------------------------
+
+class CharElement:
+    """特征序列元素：将笔视为K线，用于包含处理和分型识别"""
+
+    def __init__(self, pen_indices: List[int], high: float, low: float) -> None:
+        self.pen_indices = pen_indices  # 对应 pens 列表中的索引列表（包含处理会合并多个原始笔）
+        self.high = high
+        self.low = low
+
+
+class CharFractal:
+    """特征序列中的分型"""
+
+    def __init__(self, fractal_type: str, middle_idx: int,
+                 first_elem: CharElement, second_elem: CharElement, third_elem: CharElement) -> None:
+        self.type = fractal_type       # "top" 或 "bottom"
+        self.middle_idx = middle_idx   # 分型中间元素在标准特征序列中的索引
+        self.first_elem = first_elem
+        self.second_elem = second_elem
+        self.third_elem = third_elem
+
+
+def _build_char_sequence(pens: List[Pen], seg_start: int, seg_direction: str,
+                         klines: List[ClassicChanKline]) -> List[CharElement]:
+    """
+    构建特征序列。
+
+    向上段(seg_direction=="up")的特征序列 = 段内所有向下笔(X序列)
+    向下段(seg_direction=="down")的特征序列 = 段内所有向上笔(S序列)
+
+    Args:
+        pens: 完整笔列表
+        seg_start: 段起始笔索引
+        seg_direction: 段方向 "up" 或 "down"
+        klines: 缠论K线列表
+
+    Returns:
+        特征序列元素列表
+    """
+    opposite_dir = "down" if seg_direction == "up" else "up"
+    elements: List[CharElement] = []
+    for i in range(seg_start, len(pens)):
+        if pens[i].direction == opposite_dir:
+            elements.append(CharElement(
+                pen_indices=[i],
+                high=pen_high(pens[i], klines),
+                low=pen_low(pens[i], klines),
+            ))
+    return elements
+
+
+def _process_char_sequence_inclusion(elements: List[CharElement], seg_direction: str = "up") -> List[CharElement]:
+    """
+    对特征序列进行包含关系处理，生成标准特征序列。
+
+    先验假设：特征序列的趋势方向与段方向一致。
+    - 向上段的特征序列（X序列）整体呈上升趋势 → 默认 direction="up"
+    - 向下段的特征序列（S序列）整体呈下降趋势 → 默认 direction="down"
+
+    这是因为：
+    - 向上段中，相邻向上笔 Sᵢ 与 Sᵢ₊₁ 之间必然有重合区间，推动 X 序列低点逐步抬高
+    - 向下段中，相邻向下笔 Xᵢ 与 Xᵢ₊₁ 之间必然有重合区间，推动 S 序列高点逐步降低
+
+    包含处理规则：
+    - 上升趋势：取 high 中较高的 high，取 low 中较高的 low
+    - 下降趋势：取 high 中较低的 high，取 low 中较低的 low
+
+    Args:
+        elements: 原始特征序列
+        seg_direction: 段方向，"up" 或 "down"，决定包含处理的默认趋势方向
+    """
+    if len(elements) < 2:
+        return elements[:]
+
+    result: List[CharElement] = [CharElement(
+        pen_indices=elements[0].pen_indices[:],
+        high=elements[0].high,
+        low=elements[0].low,
+    )]
+    direction = seg_direction  # 先验方向：向上段特征序列默认上升，向下段特征序列默认下降
+
+    for i in range(1, len(elements)):
+        curr = elements[i]
+        prev = result[-1]
+
+        # 判断包含关系
+        is_contained = (curr.high <= prev.high and curr.low >= prev.low) or \
+                       (curr.high >= prev.high and curr.low <= prev.low)
+
+        if not is_contained:
+            # 无包含关系，确定方向
+            if curr.high > prev.high:
+                direction = "up"
+            elif curr.high < prev.high:
+                direction = "down"
+            result.append(CharElement(
+                pen_indices=curr.pen_indices[:],
+                high=curr.high,
+                low=curr.low,
+            ))
+        else:
+            # 有包含关系，根据方向处理
+            # 合并 pen_indices：上升取后者的索引（极值在后者），下降取前者的索引（极值在前者）
+            if direction == "up":
+                new_elem = CharElement(
+                    pen_indices=prev.pen_indices + curr.pen_indices,
+                    high=max(prev.high, curr.high),
+                    low=max(prev.low, curr.low),
+                )
+            else:
+                new_elem = CharElement(
+                    pen_indices=prev.pen_indices + curr.pen_indices,
+                    high=min(prev.high, curr.high),
+                    low=min(prev.low, curr.low),
+                )
+            result[-1] = new_elem
+
+    return result
+
+
+def _pens_overlap(pen_a: Pen, pen_b: Pen, klines: List[ClassicChanKline]) -> bool:
+    """
+    判断两根同方向笔是否有重合区间。
+
+    两根同向笔重合的条件：
+    - 向上笔：前一笔的低点 ≤ 后一笔的高点 且 后一笔的低点 ≤ 前一笔的高点
+      即 pen_a_low ≤ pen_b_high 且 pen_b_low ≤ pen_a_high
+    - 向下笔：同理，high 和 low 的重合判断与方向无关
+      即 min(pen_a_high, pen_b_high) ≥ max(pen_a_low, pen_b_low)
+
+    实际上无论方向，重合判断都是：价格区间有交集。
+    """
+    a_high = pen_high(pen_a, klines)
+    a_low = pen_low(pen_a, klines)
+    b_high = pen_high(pen_b, klines)
+    b_low = pen_low(pen_b, klines)
+    # 重合条件：两者价格区间有交集
+    return min(a_high, b_high) >= max(a_low, b_low)
+
+
+def _find_overlaps_break(pens: List[Pen], klines: List[ClassicChanKline],
+                         seg_start: int, seg_direction: str) -> int | None:
+    """
+    在当前段中检查同向笔是否有重合区间。
+
+    向上段 S₁X₁S₂X₂…SₙXₙ：检查 Sᵢ 与 Sᵢ₊₁ 是否有重合，无重合则段终结于 Sᵢ
+    向下段 X₁S₁X₂S₂…XₙSₙ：检查 Xᵢ 与 Xᵢ₊₁ 是否有重合，无重合则段终结于 Xᵢ
+
+    Args:
+        pens: 完整笔列表
+        klines: 缠论K线列表
+        seg_start: 段起始笔索引
+        seg_direction: 段方向 "up" 或 "down"
+
+    Returns:
+        段应结束的笔索引（同向笔无重合处的前一同向笔索引），
+        若所有同向笔都有重合则返回 None
+    """
+    same_dir = seg_direction  # 与段方向相同的笔
+
+    # 收集段内从 seg_start 开始的所有同向笔
+    same_dir_indices: List[int] = []
+    for i in range(seg_start, len(pens)):
+        if pens[i].direction == same_dir:
+            same_dir_indices.append(i)
+
+    # 逐对检查相邻同向笔是否有重合
+    for k in range(len(same_dir_indices) - 1):
+        idx_a = same_dir_indices[k]
+        idx_b = same_dir_indices[k + 1]
+        if not _pens_overlap(pens[idx_a], pens[idx_b], klines):
+            # S_k 与 S_{k+1} 无重合 → 段终结于 S_k
+            # 段结束笔索引 = idx_a（S_k 是段的最后一根同向笔）
+            # 因为段以同向笔结束，且 S_k 之后不能再有 S_{k+1}
+            return idx_a
+
+    return None
+
+
+def _has_gap(first: CharElement, second: CharElement) -> bool:
+    """判断特征序列中两个相邻元素之间是否有缺口（无重合区间）"""
+    return first.low > second.high or second.low > first.high
+
+
+def _identify_char_fractals(std_seq: List[CharElement]) -> List[CharFractal]:
+    """
+    在标准特征序列中识别分型。
+
+    顶分型：中间元素的 high 是三者最高，low 也是三者最高
+    底分型：中间元素的 low 是三者最低，high 也是三者最低
+    """
+    fractals: List[CharFractal] = []
+    if len(std_seq) < 3:
+        return fractals
+
+    for i in range(1, len(std_seq) - 1):
+        prev_e = std_seq[i - 1]
+        curr_e = std_seq[i]
+        next_e = std_seq[i + 1]
+
+        # 顶分型
+        if (curr_e.high > prev_e.high and curr_e.high > next_e.high and
+                curr_e.low > prev_e.low and curr_e.low > next_e.low):
+            fractals.append(CharFractal(
+                fractal_type="top",
+                middle_idx=i,
+                first_elem=prev_e,
+                second_elem=curr_e,
+                third_elem=next_e,
+            ))
+
+        # 底分型
+        elif (curr_e.low < prev_e.low and curr_e.low < next_e.low and
+              curr_e.high < prev_e.high and curr_e.high < next_e.high):
+            fractals.append(CharFractal(
+                fractal_type="bottom",
+                middle_idx=i,
+                first_elem=prev_e,
+                second_elem=curr_e,
+                third_elem=next_e,
+            ))
+
+    return fractals
+
+
+def validate_segments_v1(
     segments: List[Segment], pens: List[Pen], klines: List[ClassicChanKline], min_pens: int = 3
 ) -> List[Segment]:
     """
-    校验段列表，修复以下问题：
-    1. 段内笔数不足min_pens根 → 合并到前一段
-    2. 段方向与实际价格走势矛盾 → 翻转方向
-       - 向上段：实际最高价所在的笔索引 应 > 实际最低价所在的笔索引（高点在低点之后）
-       - 向下段：实际最低价所在的笔索引 应 > 实际最高价所在的笔索引（低点在高点之后）
-       - 若矛盾，说明方向标注错误，翻转方向
-    3. 相邻段方向相同（平行段）→ 合并到前一段
+    [v1备份] 校验段列表，确保满足缠论定义：
+    1. 每段笔数 >= min_pens 且为奇数
+    2. 段方向 = 起始笔方向 = 终止笔方向（向上段以向上笔起止，向下段以向下笔起止）
+    3. 相邻段方向交替
+    4. 相邻段首尾衔接（前一段 end_index + 1 == 后一段 start_index）
+
+    不满足时修复：合并/截断/丢弃，多轮迭代直到收敛。
     """
     if not segments:
         return segments
 
-    def _find_top_bottom_indices(seg: Segment):
-        """找到段内实际最高价和最低价所在的笔索引"""
-        top_idx = seg.start_index
-        bottom_idx = seg.start_index
-        top_val = pen_high(pens[seg.start_index], klines)
-        bottom_val = pen_low(pens[seg.start_index], klines)
-        for i in range(seg.start_index + 1, seg.end_index + 1):
-            h = pen_high(pens[i], klines)
-            l = pen_low(pens[i], klines)
-            if h > top_val:
-                top_val = h
-                top_idx = i
-            if l < bottom_val:
-                bottom_val = l
-                bottom_idx = i
-        return top_idx, bottom_idx
+    def _pen_count(seg: Segment) -> int:
+        return seg.end_index - seg.start_index + 1
 
-    def _fix_direction(seg: Segment) -> None:
-        """根据实际价格走势修正段方向"""
-        top_idx, bottom_idx = _find_top_bottom_indices(seg)
-        if seg.direction == "up" and top_idx < bottom_idx:
-            seg.direction = "down"
-        elif seg.direction == "down" and bottom_idx < top_idx:
-            seg.direction = "up"
+    def _recalc(seg: Segment) -> None:
+        """从段内笔重新计算 top/bottom/direction"""
+        seg.top = max(pen_high(pens[i], klines) for i in range(seg.start_index, seg.end_index + 1))
+        seg.bottom = min(pen_low(pens[i], klines) for i in range(seg.start_index, seg.end_index + 1))
+        seg.direction = pens[seg.start_index].direction
 
-    result: List[Segment] = []
+    changed = True
+    while changed:
+        changed = False
+        result: List[Segment] = []
 
-    for seg in segments:
-        # 段内笔数不足min_pens根 → 合并到前一段
-        pen_count = seg.end_index - seg.start_index + 1
-        if pen_count < min_pens and result:
-            prev = result[-1]
-            prev.end_index = seg.end_index
-            prev.top = max(prev.top, seg.top)
-            prev.bottom = min(prev.bottom, seg.bottom)
-            _fix_direction(prev)
-            continue
+        for seg in segments:
+            # 1. 笔数不足 min_pens → 合并到前一段
+            if _pen_count(seg) < min_pens:
+                if result:
+                    result[-1].end_index = seg.end_index
+                    _recalc(result[-1])
+                    changed = True
+                continue
 
-        # 段方向与实际价格走势矛盾 → 翻转方向
-        _fix_direction(seg)
+            # 2. 笔数为偶数 → 末尾减1笔使其为奇数
+            if _pen_count(seg) % 2 == 0:
+                seg.end_index -= 1
+                _recalc(seg)
+                changed = True
+                if _pen_count(seg) < min_pens:
+                    if result:
+                        result[-1].end_index = seg.end_index + 1
+                        _recalc(result[-1])
+                    continue
 
-        # 平行段：与前一段方向相同 → 合并到前一段
-        if result and result[-1].direction == seg.direction:
-            prev = result[-1]
-            prev.end_index = seg.end_index
-            prev.top = max(prev.top, seg.top)
-            prev.bottom = min(prev.bottom, seg.bottom)
-            _fix_direction(prev)
-            continue
+            # 3. 段方向与起始笔方向不一致 → 用起始笔方向覆盖
+            if seg.direction != pens[seg.start_index].direction:
+                seg.direction = pens[seg.start_index].direction
+                changed = True
 
-        result.append(seg)
+            # 4. 终止笔方向与段方向不一致 → 末尾减1笔
+            if pens[seg.end_index].direction != seg.direction:
+                seg.end_index -= 1
+                _recalc(seg)
+                changed = True
+                if _pen_count(seg) < min_pens:
+                    if result:
+                        result[-1].end_index = seg.end_index + 1
+                        _recalc(result[-1])
+                    continue
 
-    # 后处理：如果第一段笔数不足，合并到第二段
-    if len(result) >= 2 and (result[0].end_index - result[0].start_index + 1) < min_pens:
-        first = result.pop(0)
-        result[0].start_index = first.start_index
-        result[0].top = max(first.top, result[0].top)
-        result[0].bottom = min(first.bottom, result[0].bottom)
-        _fix_direction(result[0])
+            # 5. 与前段方向相同（平行段）→ 合并到前段
+            if result and result[-1].direction == seg.direction:
+                result[-1].end_index = seg.end_index
+                _recalc(result[-1])
+                changed = True
+                continue
 
-    # 移除仍然不足min_pens根笔的首段（无法合并也无法补足）
-    if result and (result[0].end_index - result[0].start_index + 1) < min_pens:
-        result.pop(0)
+            # 6. 与前段不衔接 → 调整 start_index 使其衔接
+            if result and result[-1].end_index + 1 != seg.start_index:
+                seg.start_index = result[-1].end_index + 1
+                _recalc(seg)
+                changed = True
+                if _pen_count(seg) < min_pens:
+                    if len(result) >= 2:
+                        result[-1].end_index = seg.end_index
+                        _recalc(result[-1])
+                    else:
+                        result[-1].end_index = seg.end_index
+                        _recalc(result[-1])
+                    continue
 
-    return result
+            result.append(seg)
+
+        # 处理首段不足的情况
+        if result and _pen_count(result[0]) < min_pens:
+            if len(result) >= 2:
+                first = result.pop(0)
+                result[0].start_index = first.start_index
+                _recalc(result[0])
+                changed = True
+            else:
+                result.pop(0)
+                changed = True
+
+        segments = result
+
+    return segments
+
+
+def validate_segments(
+    segments: List[Segment], pens: List[Pen], klines: List[ClassicChanKline], min_pens: int = 3
+) -> List[Segment]:
+    """
+    校验段列表，确保满足缠论定义：
+    1. 每段笔数 >= min_pens 且为奇数
+    2. 段方向 = 起始笔方向 = 终止笔方向（向上段以向上笔起止，向下段以向下笔起止）
+    3. 相邻段方向交替
+    4. 相邻段首尾衔接（前一段 end_index + 1 == 后一段 start_index）
+
+    不满足时修复：合并/截断/丢弃，多轮迭代直到收敛。
+    """
+    if not segments:
+        return segments
+
+    def _pen_count(seg: Segment) -> int:
+        return seg.end_index - seg.start_index + 1
+
+    def _recalc(seg: Segment) -> None:
+        """从段内笔重新计算 top/bottom/direction"""
+        seg.top = max(pen_high(pens[i], klines) for i in range(seg.start_index, seg.end_index + 1))
+        seg.bottom = min(pen_low(pens[i], klines) for i in range(seg.start_index, seg.end_index + 1))
+        seg.direction = pens[seg.start_index].direction
+
+    changed = True
+    while changed:
+        changed = False
+        result: List[Segment] = []
+
+        for seg in segments:
+            # 1. 笔数不足 min_pens → 合并到前一段
+            if _pen_count(seg) < min_pens:
+                if result:
+                    result[-1].end_index = seg.end_index
+                    _recalc(result[-1])
+                    changed = True
+                continue
+
+            # 2. 笔数为偶数 → 末尾减1笔使其为奇数
+            if _pen_count(seg) % 2 == 0:
+                seg.end_index -= 1
+                _recalc(seg)
+                changed = True
+                if _pen_count(seg) < min_pens:
+                    if result:
+                        result[-1].end_index = seg.end_index + 1
+                        _recalc(result[-1])
+                    continue
+
+            # 3. 段方向与起始笔方向不一致 → 用起始笔方向覆盖
+            if seg.direction != pens[seg.start_index].direction:
+                seg.direction = pens[seg.start_index].direction
+                changed = True
+
+            # 4. 终止笔方向与段方向不一致 → 末尾减1笔
+            if pens[seg.end_index].direction != seg.direction:
+                seg.end_index -= 1
+                _recalc(seg)
+                changed = True
+                if _pen_count(seg) < min_pens:
+                    if result:
+                        result[-1].end_index = seg.end_index + 1
+                        _recalc(result[-1])
+                    continue
+
+            # 5. 与前段方向相同（平行段）→ 合并到前段
+            if result and result[-1].direction == seg.direction:
+                result[-1].end_index = seg.end_index
+                _recalc(result[-1])
+                changed = True
+                continue
+
+            # 6. 与前段不衔接 → 调整 start_index 使其衔接
+            if result and result[-1].end_index + 1 != seg.start_index:
+                seg.start_index = result[-1].end_index + 1
+                _recalc(seg)
+                changed = True
+                if _pen_count(seg) < min_pens:
+                    if len(result) >= 2:
+                        result[-1].end_index = seg.end_index
+                        _recalc(result[-1])
+                    else:
+                        result[-1].end_index = seg.end_index
+                        _recalc(result[-1])
+                    continue
+
+            result.append(seg)
+
+        # 处理首段不足的情况
+        if result and _pen_count(result[0]) < min_pens:
+            if len(result) >= 2:
+                first = result.pop(0)
+                result[0].start_index = first.start_index
+                _recalc(result[0])
+                changed = True
+            else:
+                result.pop(0)
+                changed = True
+
+        segments = result
+
+    return segments
