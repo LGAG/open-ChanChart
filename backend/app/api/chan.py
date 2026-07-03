@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/chan", tags=["chan"])
 @router.get("/analysis", response_model=dict)
 async def get_chan_analysis(
     code: str = Query(..., description="股票代码"),
-    name: str = Query(..., description="股票名称"),
+    name: Optional[str] = Query(None, description="股票名称"),
     market: str = Query(default="sh", description="市场类型"),
     period: str = Query(default="D", description="周期 D/30F/5F"),
     start_date: str = Query("2025-01-01", description="开始日期 YYYY-MM-DD"),
