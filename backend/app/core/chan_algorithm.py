@@ -554,7 +554,10 @@ def _find_segment_end(pens: List[Pen], klines: List[ClassicChanKline],
         段结束笔索引（包含在该段内），若未找到返回 None
     """
     # 构建特征序列
-    char_seq = _build_char_sequence(pens, seg_start, seg_direction, klines)
+    # 主特征序列开启 include_prev_pen：当前段非首段时，将前段末笔（反向笔）
+    # 纳入特征序列首部，避免段首几笔因包含合并丢失分型而误延展段终点。
+    char_seq = _build_char_sequence(pens, seg_start, seg_direction, klines,
+                                    include_prev_pen=True)
     if len(char_seq) < 3:
         # 特征序列不足3个元素，无法形成分型
         return None

@@ -244,7 +244,8 @@ class CharFractal:
 
 
 def _build_char_sequence(pens: List[Pen], seg_start: int, seg_direction: str,
-                         klines: List[ClassicChanKline]) -> List[CharElement]:
+                         klines: List[ClassicChanKline],
+                         include_prev_pen: bool = False) -> List[CharElement]:
     """
     构建特征序列。
 
@@ -256,12 +257,50 @@ def _build_char_sequence(pens: List[Pen], seg_start: int, seg_direction: str,
         seg_start: 段起始笔索引
         seg_direction: 段方向 "up" 或 "down"
         klines: 缠论K线列表
+        include_prev_pen: 是否将前一段的最后一笔（seg_start-1，反向笔）作为
+            特征序列的首元素纳入。用于解决"段首几笔因包含合并导致特征序列
+            首元素丢失分型"的边界问题——当前段不是首段时，前段末笔是该段
+            特征序列的天然参照，缺失它可能让本应在段初出现的分型被合并抹掉，
+            从而误将后续笔纳入当前段。仅在主特征序列构建时开启，反向验证序列
+            不开启（其 seg_start 已是反向笔，无前段末笔可纳入）。
+
+            条件前置：仅当前段末笔不包含段内首根反向笔时才前置。若前段末笔
+            区间大于段内首根反向笔（前者包含后者），前置反而会让大区间元素
+            在包含处理中吞掉段首几笔，抹掉本该成型的分型。故此前置与否取决于
+            二者区间关系，而非一刀切。
 
     Returns:
         特征序列元素列表
     """
     opposite_dir = "down" if seg_direction == "up" else "up"
     elements: List[CharElement] = []
+    # 可选：前置前一段末笔（反向笔）作为特征序列首元素参照
+    if include_prev_pen and seg_start > 0 and pens[seg_start - 1].direction == opposite_dir:
+        prev_idx = seg_start - 1
+        prev_high = pen_high(pens[prev_idx], klines)
+        prev_low = pen_low(pens[prev_idx], klines)
+        # 找段内首根反向笔，判断前段末笔是否包含它
+        first_opp_idx: int | None = None
+        for i in range(seg_start, len(pens)):
+            if pens[i].direction == opposite_dir:
+                first_opp_idx = i
+                break
+        # 条件前置：仅当前段末笔不包含段内首根反向笔时才前置
+        # （前段末笔区间更大时会吞掉段首笔，反而破坏分型）
+        should_prepend = True
+        if first_opp_idx is not None:
+            first_high = pen_high(pens[first_opp_idx], klines)
+            first_low = pen_low(pens[first_opp_idx], klines)
+            prev_contains_first = (prev_high >= first_high and prev_low <= first_low)
+            first_contains_prev = (first_high >= prev_high and first_low <= prev_low)
+            if prev_contains_first or first_contains_prev:
+                should_prepend = False
+        if should_prepend:
+            elements.append(CharElement(
+                pen_indices=[prev_idx],
+                high=prev_high,
+                low=prev_low,
+            ))
     for i in range(seg_start, len(pens)):
         if pens[i].direction == opposite_dir:
             elements.append(CharElement(
