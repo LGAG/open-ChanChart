@@ -13,6 +13,7 @@ load_dotenv()
 from app.utils.database import engine
 from app.models.db_model import Base
 from app.service.stock import update_all_stock
+from app.service.data_check import check_data_integrity
 
 
 def init_tables():
@@ -30,7 +31,19 @@ if __name__ == "__main__":
     import uvicorn
 
     init_tables()
-    update_all_stock()
+
+    # 数据完整性检查：在 init_tables 之后、update_all_stock 之前运行。
+    # 即使 update_all_stock 因 baostock 不可用而失败，检查仍会先执行。
+    # 整体包裹，任何异常都不得阻断启动。
+    try:
+        check_data_integrity()
+    except Exception as e:
+        print(f"❌ 数据完整性检查失败（已忽略，继续启动）：{e}")
+
+    try:
+        update_all_stock()
+    except Exception as e:
+        print(f"❌ 更新股票列表失败（已忽略，继续启动）：{e}")
 
     host = os.getenv("API_HOST", "0.0.0.0")
     port = int(os.getenv("API_PORT", "8001"))

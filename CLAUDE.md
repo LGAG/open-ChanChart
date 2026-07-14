@@ -16,7 +16,7 @@ conda run -n ws python run.py                       # start server (auto-inits D
 conda run -n ws mypy .                              # type check (required after changes)
 ```
 
-Backend runs on `http://localhost:8000`. Requires MySQL (docker-compose up -d) and Redis running first.
+Backend runs on `http://localhost:8001` (port 8000 is occupied by the Windows `iphlpsvc` system service). Requires MySQL (docker-compose up -d) and Redis running first.
 
 ### Frontend
 ```bash

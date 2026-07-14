@@ -4,8 +4,18 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from app.utils.database import engine, get_session
-from app.models.db_model import Stock, DayKline, WeekKline, MonthKline, YearKline, get_kline_model
+from app.models.db_model import Stock, DayKline, WeekKline, MonthKline, YearKline, get_kline_model, KLINE_MODEL_MAP
 from app.config.config import PERIOD_MAP
+from app.models.period import SUPPORTED_PERIODS, resolve_period
+
+# 时间类周期（按 start_time/end_time 存储），其余为日期类（按 date 存储）。
+_TIME_PERIOD_TABLE_KEYS = {"hour", "half", "five_min"}
+# 时间类周期每根 K 线的时长，用于由 end_time 反推 start_time。
+_TIME_TABLE_KEY_DURATION = {
+    "hour": timedelta(hours=1),
+    "half": timedelta(minutes=30),
+    "five_min": timedelta(minutes=5),
+}
 
 
 def validate_stock(code: str, market: str, name: str | None = None) -> bool:
@@ -208,14 +218,17 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
     Returns:
         更新结果统计
     """
-    ALL_PERIODS = ["d", "60", "30", "5", "w", "m", "y"]
-    PERIOD_DISPLAY = {"d": "日K", "60": "60分K", "30": "30分K", "5": "5分K", "w": "周K", "m": "月K", "y": "年K"}
-    PERIOD_NORMALIZE = PERIOD_MAP
-
+    # 周期定义来自 app.models.period 的单一真相源：value 即前后端约定的 period 字符串。
     if periods is None:
-        periods = ALL_PERIODS
+        period_defs = list(SUPPORTED_PERIODS)
     else:
-        periods = [PERIOD_NORMALIZE.get(p.lower(), p) for p in periods]
+        period_defs = []
+        for p in periods:
+            pd_def = resolve_period(p)
+            if pd_def is None:
+                # 无法识别的周期跳过，避免向下传非法值
+                continue
+            period_defs.append(pd_def)
 
     if end_date is None:
         end_date = datetime.now().strftime("%Y-%m-%d")
@@ -246,17 +259,47 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
         stock_key = f"{stock['market']}.{stock['code']}"
         stock_results: dict[str, str] = {}
 
-        for period in periods:
+        for pd_def in period_defs:
+            display_name = pd_def.label
             try:
                 lg = bs.login()
-                display_name = PERIOD_DISPLAY.get(period, period)
+                baostock_symbol = f"{stock['market']}.{stock['code']}"
 
-                if period == "d":
+                if pd_def.table_key in _TIME_PERIOD_TABLE_KEYS:
+                    # 时间类周期（hour/half/five_min）：按 time 列取数，存 start_time/end_time
                     rs = bs.query_history_k_data_plus(
-                        f"{stock['market']}.{stock['code']}",
+                        baostock_symbol,
+                        "time,code,open,high,low,close,volume",
+                        start_date=start_date, end_date=end_date,
+                        frequency=pd_def.baostock_freq, adjustflag="3"
+                    )
+                    df = _rs_to_dataframe(rs)
+                    if df.empty:
+                        stock_results[display_name] = "无数据"
+                        continue
+                    timedelta_val = _TIME_TABLE_KEY_DURATION[pd_def.table_key]
+                    df['period'] = pd_def.table_key
+                    df['level'] = pd_def.level
+                    df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
+                    df['market'] = df['market'].str.lower()
+                    df['end_time'] = df['time'].apply(parse_time_to_minute)
+                    df['start_time'] = df['end_time'] - timedelta_val
+                    df['start_time'] = df['start_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
+                    df['end_time'] = df['end_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
+                    df = df.drop(columns=['code', 'time'])
+                    df.rename(columns={'new_code': 'code'}, inplace=True)
+
+                    model_class = KLINE_MODEL_MAP.get(pd_def.table_key)
+                    if model_class:
+                        _upsert_dataframe(df, model_class)
+
+                else:
+                    # 日期类周期（day/week/month/year）：按 date 列取数
+                    rs = bs.query_history_k_data_plus(
+                        baostock_symbol,
                         "date,code,open,high,low,close,volume",
                         start_date=start_date, end_date=end_date,
-                        frequency="d", adjustflag="3"
+                        frequency=pd_def.baostock_freq, adjustflag="3"
                     )
                     if rs is None:
                         stock_results[display_name] = "查询失败"
@@ -267,112 +310,20 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
                         continue
                     df['volume'] = df['volume'].astype(str).replace({'': '0', 'nan': '0', 'None': '0'})
                     df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
-                    df['period'] = 'day'
-                    df['level'] = 6
+                    df['period'] = pd_def.table_key
+                    df['level'] = pd_def.level
                     df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
                     df['market'] = df['market'].str.lower()
                     df = df.drop(columns=['code'])
                     df.rename(columns={'new_code': 'code'}, inplace=True)
-                    _upsert_dataframe(df, DayKline)
 
-                elif period in ("60", "30", "5"):
-                    freq_map = {"60": "60", "30": "30", "5": "5"}
-                    rs = bs.query_history_k_data_plus(
-                        f"{stock['market']}.{stock['code']}",
-                        "time,code,open,high,low,close,volume",
-                        start_date=start_date, end_date=end_date,
-                        frequency=freq_map[period], adjustflag="3"
-                    )
-                    df = _rs_to_dataframe(rs)
-                    if df.empty:
-                        stock_results[display_name] = "无数据"
-                        continue
-                    period_label = 'hour' if period == '60' else 'half' if period == '30' else 'five_min'
-                    level = 5 if period in ('60', '30') else 4
-                    timedelta_val = timedelta(hours=1) if period == '60' else timedelta(minutes=30) if period == '30' else timedelta(minutes=5)
-
-                    df['period'] = period_label
-                    df['level'] = level
-                    df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
-                    df['market'] = df['market'].str.lower()
-                    df['end_time'] = df['time'].apply(parse_time_to_minute)
-                    df['start_time'] = df['end_time'] - timedelta_val
-                    df['start_time'] = df['start_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
-                    df['end_time'] = df['end_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
-                    df = df.drop(columns=['code', 'time'])
-                    df.rename(columns={'new_code': 'code'}, inplace=True)
-
-                    model_class = get_kline_model(period_label)
+                    model_class = KLINE_MODEL_MAP.get(pd_def.table_key)
                     if model_class:
                         _upsert_dataframe(df, model_class)
-
-                elif period == "w":
-                    rs = bs.query_history_k_data_plus(
-                        f"{stock['market']}.{stock['code']}",
-                        "date,code,open,high,low,close,volume",
-                        start_date=start_date, end_date=end_date,
-                        frequency="w", adjustflag="3"
-                    )
-                    df = _rs_to_dataframe(rs)
-                    if df.empty:
-                        stock_results[display_name] = "无数据"
-                        continue
-                    df['volume'] = df['volume'].astype(str).replace({'': '0', 'nan': '0', 'None': '0'})
-                    df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
-                    df['period'] = 'week'
-                    df['level'] = 7
-                    df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
-                    df['market'] = df['market'].str.lower()
-                    df = df.drop(columns=['code'])
-                    df.rename(columns={'new_code': 'code'}, inplace=True)
-                    _upsert_dataframe(df, WeekKline)
-
-                elif period == "m":
-                    rs = bs.query_history_k_data_plus(
-                        f"{stock['market']}.{stock['code']}",
-                        "date,code,open,high,low,close,volume",
-                        start_date=start_date, end_date=end_date,
-                        frequency="m", adjustflag="3"
-                    )
-                    df = _rs_to_dataframe(rs)
-                    if df.empty:
-                        stock_results[display_name] = "无数据"
-                        continue
-                    df['volume'] = df['volume'].astype(str).replace({'': '0', 'nan': '0', 'None': '0'})
-                    df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
-                    df['period'] = 'month'
-                    df['level'] = 8
-                    df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
-                    df['market'] = df['market'].str.lower()
-                    df = df.drop(columns=['code'])
-                    df.rename(columns={'new_code': 'code'}, inplace=True)
-                    _upsert_dataframe(df, MonthKline)
-
-                elif period == "y":
-                    rs = bs.query_history_k_data_plus(
-                        f"{stock['market']}.{stock['code']}",
-                        "date,code,open,high,low,close,volume",
-                        start_date=start_date, end_date=end_date,
-                        frequency="y", adjustflag="3"
-                    )
-                    df = _rs_to_dataframe(rs)
-                    if df.empty:
-                        stock_results[display_name] = "无数据"
-                        continue
-                    df['volume'] = df['volume'].astype(str).replace({'': '0', 'nan': '0', 'None': '0'})
-                    df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
-                    df['period'] = 'year'
-                    df['level'] = 9
-                    df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
-                    df['market'] = df['market'].str.lower()
-                    df = df.drop(columns=['code'])
-                    df.rename(columns={'new_code': 'code'}, inplace=True)
-                    _upsert_dataframe(df, YearKline)
 
                 stock_results[display_name] = f"成功({len(df)}条)"
 
             except Exception as e:
-                display_name = PERIOD_DISPLAY.get(period, period)
                 stock_results[display_name] = f"失败: {e}"
             finally:
                 bs.logout()

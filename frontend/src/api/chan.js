@@ -10,3 +10,13 @@ export function getChanAnalysis(params) {
     params
   })
 }
+
+/**
+ * Get supported periods (synced from backend single source of truth)
+ */
+export function getPeriods() {
+  return request({
+    url: '/api/chan/periods',
+    method: 'get'
+  })
+}

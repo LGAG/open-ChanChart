@@ -5,8 +5,22 @@ from typing import Optional
 from app.models.stock_model import KlineData
 from app.core.chan_algorithm import calculate_chan_data
 from app.api.stock import get_kline_data
+from app.models.period import periods_for_api
 
 router = APIRouter(prefix="/api/chan", tags=["chan"])
+
+
+@router.get("/periods", response_model=dict)
+async def get_periods():
+    """返回后端支持的周期清单，供前端周期选择下拉框同步使用。
+
+    数据来自 app.models.period.SUPPORTED_PERIODS（单一真相源）。
+    """
+    return {
+        "code": 200,
+        "message": "Success",
+        "data": periods_for_api(),
+    }
 
 
 @router.get("/analysis", response_model=dict)
@@ -32,7 +46,12 @@ async def get_chan_analysis(
     )
     
     if kline_response["code"] != 200:
-        raise HTTPException(status_code=400, detail="Failed to fetch kline data")
+        # 透传 get_kline_data 的友好提示（周期不支持 / 数据源获取失败等），
+        # 方便前端展示与问题记录。HTTP 状态码与业务 code 对齐。
+        raise HTTPException(
+            status_code=kline_response["code"],
+            detail=kline_response.get("message", "Failed to fetch kline data")
+        )
     
     klines_data = kline_response["data"]["klines"]
     

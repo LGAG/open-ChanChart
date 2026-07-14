@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from app.service.stock import get_stock_data_bao, query_stocks_list, search_stocks, update_kline_data, update_all_stock, get_stock_data_database, get_kline_date_range
 from app.models.stock_model import StockListResponse
+from app.models.period import resolve_period, periods_for_api
 
 router = APIRouter(prefix="/api/stock", tags=["stock"])
 
@@ -51,6 +52,21 @@ async def get_kline_data(
     """
     print(f"code:{code}, name:{name}, market:{market}, period:{period}, start_date:{start_date}, end_date:{end_date}")
 
+    # 周期校验：不在受支持清单内时，直接返回明确提示，避免无谓调用数据源。
+    # 同时给出受支持周期列表，方便排查/记录（数据源不支持的周期不会出现在此列表）。
+    period_def = resolve_period(period)
+    if period_def is None:
+        supported = ", ".join(p["value"] for p in periods_for_api())
+        msg = f"不支持的周期: {period}。数据源(baostock)支持的周期为: {supported}"
+        print(f"[周期不支持] {msg}")
+        return {
+            "code": 400,
+            "message": msg,
+            "data": None
+        }
+    # 后续统一用标准 value，避免 daily/d 等别名在链路中不一致
+    period = period_def.value
+
     # 检查数据库中该股票该周期的日期覆盖范围
     db_min, db_max = get_kline_date_range(code, market, period, name=name)
     request_start = datetime.strptime(start_date[:10], "%Y-%m-%d").date()
@@ -93,9 +109,15 @@ async def get_kline_data(
         df = get_stock_data_bao(code=code, market=market, period=period, start_timestamp=start_date, end_timestamp=end_date)
 
     if df is False or df is None or (hasattr(df, 'empty') and df.empty):
+        # 数据源拉取失败：周期受支持但 baostock 仍未返回数据
+        # （常见原因：该股票该周期在请求区间内无数据/停牌/数据源临时不可用）
+        msg = (f"无法从数据源获取K线数据: 股票={market}.{code}({name or '未命名'}), "
+               f"周期={period}, 区间={start_date[:10]}~{end_date[:10]}。"
+               f"请记录此情况以便后续排查（数据源可能不支持该股票/周期组合或区间内无数据）")
+        print(f"[数据源获取失败] {msg}")
         return {
             "code": 500,
-            "message": "获取K线数据失败",
+            "message": msg,
             "data": None
         }
 

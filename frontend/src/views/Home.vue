@@ -11,11 +11,14 @@
 
         <div class="control-item">
           <label>选择周期：</label>
-          <el-radio-group v-model="period" @change="loadData">
-            <el-radio-button label="daily">日K</el-radio-button>
-            <el-radio-button label="60F">1小时</el-radio-button>
-            <el-radio-button label="30F">30分</el-radio-button>
-          </el-radio-group>
+          <el-select v-model="period" @change="loadData" placeholder="选择周期" style="width: 120px">
+            <el-option
+              v-for="opt in periodOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
         </div>
 
         <div class="control-item">
@@ -82,11 +85,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import KlineChart from '../components/KlineChart.vue'
 import StockSelector from '../components/StockSelector.vue'
-import { getChanAnalysis } from '../api/chan'
+import { getChanAnalysis, getPeriods } from '../api/chan'
 import { refreshStockList, updateKlineData } from '../api/stock'
 
 interface Stock {
@@ -95,8 +98,26 @@ interface Stock {
   market: 'sh' | 'sz'
 }
 
+interface PeriodOption {
+  value: string
+  label: string
+}
+
+// 与后端 app.models.period.SUPPORTED_PERIODS 同值的回落默认清单，
+// 后端未启动或请求失败时下拉不会空白。
+const DEFAULT_PERIOD_OPTIONS: PeriodOption[] = [
+  { value: 'day', label: '日K' },
+  { value: 'week', label: '周K' },
+  { value: 'month', label: '月K' },
+  { value: 'year', label: '年K' },
+  { value: '60F', label: '60分K' },
+  { value: '30F', label: '30分K' },
+  { value: '5F', label: '5分K' }
+]
+
 const currentStock = ref<Stock | null>(null)
-const period = ref('daily')
+const period = ref('day')
+const periodOptions = ref<PeriodOption[]>(DEFAULT_PERIOD_OPTIONS)
 const loading = ref(false)
 const refreshingList = ref(false)
 const updatingKline = ref(false)
@@ -111,6 +132,18 @@ const dateRange = ref<[string, string]>([
   new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().slice(0, 10),
   new Date().toISOString().slice(0, 10)
 ])
+
+// 启动时从后端同步支持的周期；失败则保留 DEFAULT_PERIOD_OPTIONS，下拉不空白
+onMounted(async () => {
+  try {
+    const response = await getPeriods()
+    if (response?.code === 200 && Array.isArray(response.data) && response.data.length > 0) {
+      periodOptions.value = response.data as PeriodOption[]
+    }
+  } catch (error) {
+    console.error('加载周期列表失败，使用默认清单:', error)
+  }
+})
 
 const handleStockChange = (stock: Stock) => {
   currentStock.value = stock

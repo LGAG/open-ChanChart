@@ -194,18 +194,18 @@ def get_kline_model(period: str) -> type[Base] | None:
     - "hour", "60", "60F" → HourKline
     - "half", "30", "30F" → HalfKline
     - "five_min", "5", "5F" → FiveMinKline
-    - "week" → WeekKline
-    - "month" → MonthKline
-    - "year" → YearKline
+    - "week", "w" → WeekKline
+    - "month", "m" → MonthKline
+    - "year", "y" → YearKline
     """
     normalized = {
         "day": "day", "daily": "day", "d": "day",
-        "hour": "60", "60": "hour", "60f": "hour",
+        "hour": "hour", "60": "hour", "60f": "hour",
         "half": "half", "30": "half", "30f": "half",
         "five_min": "five_min", "5": "five_min", "5f": "five_min",
-        "week": "week",
-        "month": "month",
-        "year": "year",
+        "week": "week", "w": "week",
+        "month": "month", "m": "month",
+        "year": "year", "y": "year",
     }.get(period.lower())
     if normalized is None:
         return None

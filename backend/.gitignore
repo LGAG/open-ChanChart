@@ -22,3 +22,6 @@ build/
 *.swp
 *.swo
 mysql/
+
+# Logs
+/logs/
