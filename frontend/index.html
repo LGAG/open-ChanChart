@@ -5,6 +5,32 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChanChart 缠论股票图表</title>
+    <!--
+      Anti-FOUC: paint the saved theme's background + html.dark class before the
+      app renders, so dark themes don't flash white. The Element Plus dark
+      css-vars <link> and full variable set are injected by useTheme.js (via a
+      production-safe ?url import) once Vue loads — which happens before any EP
+      component mounts, so components don't flash light. Mirrors
+      composables/themes.js (keep bg/dark values in sync when adding a theme).
+    -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('chanchart-theme');
+          var bgs = {
+            classic: '#f5f5f5', cyberpunk: '#0a0014', hologram: '#02141a',
+            deepspace: '#02061a', mecha: '#0d0a02'
+          };
+          var darkSet = { cyberpunk: 1, hologram: 1, deepspace: 1, mecha: 1 };
+          var t = (raw && bgs[raw]) ? raw : 'classic';
+          var root = document.documentElement;
+          root.dataset.theme = t;
+          if (darkSet[t]) root.classList.add('dark');
+          root.style.setProperty('--bg', bgs[t]);
+          root.style.backgroundColor = bgs[t];
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

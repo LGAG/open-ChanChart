@@ -204,6 +204,9 @@ const loadData = async () => {
   padding: 20px;
   max-width: 1400px;
   margin: 0 auto;
+  position: relative;
+  z-index: 1;
+  color: var(--text);
 }
 
 .control-panel {
@@ -212,7 +215,7 @@ const loadData = async () => {
 
 .control-panel h2 {
   margin: 0 0 20px 0;
-  color: #409eff;
+  color: var(--accent);
 }
 
 .controls {
@@ -236,7 +239,7 @@ const loadData = async () => {
 .info {
   margin-top: 15px;
   padding-top: 15px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--panel-border);
 }
 
 .chart-panel {
@@ -245,5 +248,6 @@ const loadData = async () => {
 
 .stats-panel h3 {
   margin: 0 0 20px 0;
+  color: var(--text);
 }
 </style>

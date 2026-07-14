@@ -4,22 +4,22 @@
       <div class="chan-toggles">
         <label class="toggle-item">
           <input type="checkbox" v-model="showPens" @change="updateChart" />
-          <span class="toggle-indicator" style="background: #0000FF;"></span>
+          <span class="toggle-indicator" :style="{ background: palette.pen, boxShadow: '0 0 6px ' + palette.pen }"></span>
           笔
         </label>
         <label class="toggle-item">
           <input type="checkbox" v-model="showFractals" @change="updateChart" />
-          <span class="toggle-indicator" style="background: linear-gradient(135deg, #FF0000 50%, #00FF00 50%);"></span>
+          <span class="toggle-indicator" :style="{ background: 'linear-gradient(135deg,' + palette.up + ' 50%,' + palette.down + ' 50%)' }"></span>
           分型
         </label>
         <label class="toggle-item">
           <input type="checkbox" v-model="showSegments" @change="updateChart" />
-          <span class="toggle-indicator" style="background: #FF6600;"></span>
+          <span class="toggle-indicator" :style="{ background: palette.seg, boxShadow: '0 0 6px ' + palette.seg }"></span>
           段
         </label>
         <label class="toggle-item">
           <input type="checkbox" v-model="showZhongshu" @change="updateChart" />
-          <span class="toggle-indicator" style="background: repeating-linear-gradient(90deg, rgba(255,0,0,0.3) 0 4px, transparent 4px 8px); border: 1px solid rgba(0,0,0,0.15);"></span>
+          <span class="toggle-indicator" :style="{ background: 'repeating-linear-gradient(90deg,' + palette.zsh + ' 0 4px, transparent 4px 8px)' }"></span>
           中枢
         </label>
       </div>
@@ -37,8 +37,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
+import { useTheme } from '../composables/useTheme'
 
 const props = defineProps({
   klineData: {
@@ -60,6 +61,10 @@ const showPens = ref(true)
 const showFractals = ref(true)
 const showSegments = ref(true)
 const showZhongshu = ref(true)
+
+// Theme-driven color palette (re-renders chart on theme change)
+const { currentTheme, themeMeta } = useTheme()
+const palette = computed(() => themeMeta.value.echarts)
 
 const toggleFullscreen = () => {
   isFullscreen.value = !isFullscreen.value
@@ -86,6 +91,8 @@ const initChart = () => {
 
 const updateChart = () => {
   if (!chartInstance || !props.klineData.length) return
+
+  const p = palette.value
 
   // Prepare K-line data
   const dates = props.klineData.map(item => item.date)
@@ -170,7 +177,7 @@ const updateChart = () => {
             return null
           }),
           lineStyle: {
-            color: 'rgba(255, 0, 0, 0.3)',
+            color: p.zsh,
             width: 2,
             type: 'dashed'
           },
@@ -186,7 +193,7 @@ const updateChart = () => {
             return null
           }),
           lineStyle: {
-            color: 'rgba(0, 255, 0, 0.3)',
+            color: p.zsl,
             width: 2,
             type: 'dashed'
           },
@@ -206,19 +213,28 @@ const updateChart = () => {
   }
 
   const option = {
+    backgroundColor: p.bg,
     title: {
       text: '缠论K线图',
-      left: 'center'
+      left: 'center',
+      textStyle: { color: p.text, fontSize: 15, fontWeight: 600 }
     },
     tooltip: {
       trigger: 'axis',
       axisPointer: {
-        type: 'cross'
-      }
+        type: 'cross',
+        lineStyle: { color: p.axis }
+      },
+      backgroundColor: 'rgba(10, 10, 20, 0.9)',
+      borderColor: p.axis,
+      borderWidth: 1,
+      textStyle: { color: p.text }
     },
     legend: {
       data: legendData,
-      top: 30
+      top: 30,
+      textStyle: { color: p.text },
+      inactiveColor: '#555'
     },
     grid: [
       {
@@ -240,7 +256,8 @@ const updateChart = () => {
         data: dates,
         scale: true,
         boundaryGap: false,
-        axisLine: { onZero: false },
+        axisLine: { onZero: false, lineStyle: { color: p.axis } },
+        axisLabel: { color: p.text },
         splitLine: { show: false },
         min: 'dataMin',
         max: 'dataMax'
@@ -251,7 +268,7 @@ const updateChart = () => {
         data: dates,
         scale: true,
         boundaryGap: false,
-        axisLine: { onZero: false },
+        axisLine: { onZero: false, lineStyle: { color: p.axis } },
         axisTick: { show: false },
         splitLine: { show: false },
         axisLabel: { show: false },
@@ -262,8 +279,12 @@ const updateChart = () => {
     yAxis: [
       {
         scale: true,
+        axisLine: { lineStyle: { color: p.axis } },
+        axisLabel: { color: p.text },
+        splitLine: { lineStyle: { color: p.split } },
         splitArea: {
-          show: true
+          show: true,
+          areaStyle: { color: ['transparent', p.split] }
         }
       },
       {
@@ -289,7 +310,11 @@ const updateChart = () => {
         type: 'slider',
         top: '93%',
         start: 0,
-        end: 100
+        end: 100,
+        dataBackground: { lineStyle: { color: p.axis }, areaStyle: { color: p.split } },
+        fillerColor: p.split,
+        borderColor: p.axis,
+        textStyle: { color: p.text }
       }
     ],
     series: [
@@ -298,10 +323,10 @@ const updateChart = () => {
         type: 'candlestick',
         data: ohlc,
         itemStyle: {
-          color: '#ef232a',
-          color0: '#14b143',
-          borderColor: '#ef232a',
-          borderColor0: '#14b143'
+          color: p.up,
+          color0: p.down,
+          borderColor: p.up,
+          borderColor0: p.down
         }
       },
       {
@@ -313,9 +338,10 @@ const updateChart = () => {
         itemStyle: {
           color: function(params) {
             const index = params.dataIndex
-            if (index === 0) return '#14b143'
-            return ohlc[index][1] >= ohlc[index][0] ? '#ef232a' : '#14b143'
-          }
+            if (index === 0) return p.down
+            return ohlc[index][1] >= ohlc[index][0] ? p.up : p.down
+          },
+          opacity: 0.6
         }
       },
       ...zhongshuSeries
@@ -329,11 +355,14 @@ const updateChart = () => {
       type: 'line',
       data: penLineData,
       lineStyle: {
-        color: '#0000FF',
-        width: 2
+        color: p.pen,
+        width: 2,
+        shadowColor: p.pen,
+        shadowBlur: 8
       },
       symbol: 'circle',
       symbolSize: 6,
+      itemStyle: { color: p.pen },
       connectNulls: false
     })
   }
@@ -345,11 +374,14 @@ const updateChart = () => {
       type: 'line',
       data: segmentLineData,
       lineStyle: {
-        color: '#FF6600',
-        width: 3
+        color: p.seg,
+        width: 3,
+        shadowColor: p.seg,
+        shadowBlur: 10
       },
       symbol: 'diamond',
       symbolSize: 8,
+      itemStyle: { color: p.seg },
       connectNulls: false
     })
   }
@@ -364,7 +396,9 @@ const updateChart = () => {
       symbolSize: 10,
       symbolRotate: 180,
       itemStyle: {
-        color: '#FF0000'
+        color: p.up,
+        shadowColor: p.up,
+        shadowBlur: 8
       }
     })
   }
@@ -377,7 +411,9 @@ const updateChart = () => {
       symbol: 'triangle',
       symbolSize: 10,
       itemStyle: {
-        color: '#00FF00'
+        color: p.down,
+        shadowColor: p.down,
+        shadowBlur: 8
       }
     })
   }
@@ -388,6 +424,11 @@ const updateChart = () => {
 watch(() => [props.klineData, props.chanData], () => {
   updateChart()
 }, { deep: true })
+
+// Re-render with new palette when the theme changes
+watch(currentTheme, () => {
+  nextTick(updateChart)
+})
 
 // Handle window resize
 const handleResize = () => {
@@ -439,7 +480,7 @@ onBeforeUnmount(() => {
   gap: 5px;
   cursor: pointer;
   font-size: 13px;
-  color: #606266;
+  color: var(--text-dim);
   user-select: none;
 }
 
@@ -448,7 +489,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
   width: 15px;
   height: 15px;
-  accent-color: #409eff;
+  accent-color: var(--accent);
 }
 
 .toggle-indicator {
@@ -466,18 +507,18 @@ onBeforeUnmount(() => {
   width: 32px;
   height: 32px;
   padding: 0;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
-  background: #fff;
-  color: #606266;
+  background: var(--panel-bg);
+  color: var(--text-dim);
   cursor: pointer;
   transition: all 0.2s;
   flex-shrink: 0;
 }
 
 .fullscreen-btn:hover {
-  color: #409eff;
-  border-color: #409eff;
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .chart-container {
@@ -493,7 +534,7 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   z-index: 9999;
-  background: #fff;
+  background: var(--bg);
   padding: 0 16px;
 }
 
@@ -508,7 +549,7 @@ onBeforeUnmount(() => {
 .kline-chart.is-fullscreen .fullscreen-btn {
   width: 36px;
   height: 36px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--panel-bg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 </style>

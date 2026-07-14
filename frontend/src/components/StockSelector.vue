@@ -18,7 +18,7 @@
         :value="item.code + '|' + item.name"
       >
         <span>{{ item.code }}</span>
-        <span style="float: right; color: #8492a6; font-size: 13px">{{ item.name }}</span>
+        <span style="float: right; color: var(--text-dim); font-size: 13px">{{ item.name }}</span>
       </el-option>
     </el-select>
   </div>
