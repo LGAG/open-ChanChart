@@ -2,12 +2,16 @@ import request from './request'
 
 /**
  * Search stocks
+ * @param {string} keyword
+ * @param {string|null} market
+ * @param {object} [config] axios config（如 { signal } 用于取消请求）
  */
-export function searchStocks(keyword, market = null) {
+export function searchStocks(keyword, market = null, config = {}) {
   return request({
     url: '/api/stock/search',
     method: 'get',
-    params: { keyword, market }
+    params: { keyword, market },
+    ...config
   })
 }
 

@@ -616,38 +616,172 @@ def _find_segment_end(pens: List[Pen], klines: List[ClassicChanKline],
     return None
 
 
+def _pen_range_high(pen: Pen, klines: List[ClassicChanKline]) -> float:
+    """笔跨越的全部缠论K线的最高价（含中间K线）。
+
+    与 chan_helpers.pen_high（仅取端点K线）不同：中枢判定需要笔的真实价格区间，
+    因为「离开后回抽」要求回抽笔的 body 可能重新触及中枢区间——端点K线不足以表达
+    （相邻笔共享端点，端点已在区间外时回抽笔的端点也必在区间外，导致回抽确认分支
+    逻辑上不可达，已用严格交替笔序列证明）。改用全程极值后，回抽笔的中间K线可回到
+    区间，回抽确认分支才会真正激活，破坏判定才贴近缠论原文「离开+回抽不回区间」。
+
+    仅用于中枢扫描（_scan_pens_for_zhongshus）；段算法/笔校验仍用端点版 pen_high/pen_low，
+    语义不变。
+    """
+    return max(klines[i].high for i in range(pen.start_index, pen.end_index + 1))
+
+
+def _pen_range_low(pen: Pen, klines: List[ClassicChanKline]) -> float:
+    """笔跨越的全部缠论K线的最低价（含中间K线）。见 _pen_range_high 说明。"""
+    return min(klines[i].low for i in range(pen.start_index, pen.end_index + 1))
+
+
+def _scan_pens_for_zhongshus(
+    pens: List[Pen], klines: List[ClassicChanKline],
+    pen_lo: int, pen_hi: int, seg_direction: str,
+) -> List[ZhongShu]:
+    """
+    在笔索引区间 [pen_lo, pen_hi]（同一段内）扫描笔中枢（见 zhongshu.md §3.2~3.4）。
+
+    方向约束（缠论图示约定）：中枢以「反向笔」起止。
+      - 向上段（seg_direction="up"）的反向笔 = 向下笔，中枢三笔形如 X S X（下-上-下）
+      - 向下段（seg_direction="down"）的反向笔 = 向上笔，中枢三笔形如 S X S（上-下-上）
+    因此中枢从段内第一根反向笔开始取连续三笔；不成中枢则从下一根反向笔重新开始
+    （不是逐笔滑动）。
+
+    成中枢【原文第18课公式】：连续 3 笔 p1,p2,p3（p1 为反向笔，三笔方向 反-同-反）
+      ZG = min(笔全程最高)   ZD = max(笔全程最低)
+      ZG > ZD 则成中枢，区间 [ZD, ZG]，start = p1.start_index，end = p3.end_index。
+    延伸【结构约束】：中枢结构为 X + (S X)*，延伸以「同向笔+反向笔」成对吸收，
+      两者都必须与 [ZD,ZG] 相交才纳入该对（end 落在反向笔）。
+      => 中枢笔数恒为奇数(>=3)，以反向笔起止（结构对称不变量）。
+    破坏【原文】：同向笔离开区间不立即破坏，看下一笔回抽是否回到 [ZD,ZG]；
+      回抽不回区间才确认破坏（第20课中枢重新定理）。破坏/段尾时 end 停在离开前
+      最后一根反向笔（同向笔不能作 end，离开笔不属于中枢）。不设 9 段上限（后人演绎）。
+
+    注：start_index/end_index 为缠论 K 线索引（与笔同语义）；high=ZG，low=ZD。
+    笔高低点用全程极值 _pen_range_high/_pen_range_low（非端点版），否则回抽确认
+    分支在端点共享的相邻笔下逻辑上不可达。
+    """
+    # 反向笔方向：与段方向相反
+    opposite_dir = "down" if seg_direction == "up" else "up"
+
+    zhongshus: List[ZhongShu] = []
+    i = pen_lo
+    while i + 2 <= pen_hi:
+        # 中枢必须从反向笔开始；非反向笔则跳到下一根
+        if pens[i].direction != opposite_dir:
+            i += 1
+            continue
+
+        p1, p2, p3 = pens[i], pens[i + 1], pens[i + 2]
+        # 成中枢区间：三笔全程高低点的重叠（原文第18课 (max(低), min(高))）
+        zg = min(_pen_range_high(p1, klines), _pen_range_high(p2, klines), _pen_range_high(p3, klines))
+        zd = max(_pen_range_low(p1, klines), _pen_range_low(p2, klines), _pen_range_low(p3, klines))
+
+        if zg <= zd:
+            # 三笔无重叠，从下一根反向笔重新开始
+            i += 1
+            continue
+
+        # 成中枢（p1、p3 均为反向笔，以反向笔起止）
+        start_index = p1.start_index
+        # ZG/ZD 成中枢后全程固定（延伸/回抽都不改区间）
+        # last_in_index：最后纳入中枢的笔索引（离开笔不算，初始=成中枢第三笔 p3，反向笔）
+        # 结构不变量：last_in_index - i 恒为偶数 => 中枢笔数恒为奇数(>=3)，以反向笔起止。
+        last_in_index = i + 2
+
+        # 延伸 / 破坏扫描：结构上中枢 = X + (S X)*，延伸以「同向笔+反向笔」成对吸收。
+        # k 始终指向同向笔（相对 i 为奇数偏移），k+1 指向其后反向笔。
+        k = i + 3
+        while k <= pen_hi:
+            pk = pens[k]  # 同向笔
+            pk_high = _pen_range_high(pk, klines)
+            pk_low = _pen_range_low(pk, klines)
+            pk_inter = pk_high >= zd and pk_low <= zg
+
+            if not pk_inter:
+                # 同向笔离开区间 → 离开笔，进入破坏判定（看下一笔 pk1 回抽）
+                if k + 1 > pen_hi:
+                    # 段尾，离开笔无法被回抽确认 → 保守结束（end 停在离开前最后一笔）
+                    break
+                pk1 = pens[k + 1]
+                if pk_low > zg:
+                    reentered = _pen_range_low(pk1, klines) <= zg
+                elif pk_high < zd:
+                    reentered = _pen_range_high(pk1, klines) >= zd
+                else:
+                    reentered = True
+                if reentered:
+                    # 回抽进区间 → 离开笔+回抽笔作为一对延伸纳入（end 落在反向笔 pk1）
+                    last_in_index = k + 1
+                    k += 2
+                else:
+                    # 回抽不回区间 → 确认破坏（end 停在离开前最后一笔）
+                    break
+            else:
+                # 同向笔 pk 相交，需看其反向伙伴 pk1 是否也相交才能成对延伸
+                if k + 1 > pen_hi:
+                    # 段尾只剩同向笔，无反向伙伴配对 → 不能延伸（同向笔不能作 end），保守结束
+                    break
+                pk1 = pens[k + 1]  # 反向笔
+                pk1_inter = _pen_range_high(pk1, klines) >= zd and _pen_range_low(pk1, klines) <= zg
+                if pk1_inter:
+                    # 同向笔 + 反向笔都相交 → 成对延伸，end 落在反向笔 pk1（保持奇数）
+                    last_in_index = k + 1
+                    k += 2
+                else:
+                    # 同向笔相交但反向笔离开/不相交 → 该对不能延伸，
+                    # 且同向笔不能作 end（破坏「反向笔起止」），中枢在 pk 之前结束
+                    break
+
+        # end 永远停在最后纳入的反向笔（结构上保证奇数笔、反向起止）
+        end_index = pens[last_in_index].end_index
+        zhongshus.append(ZhongShu(
+            start_index=start_index,
+            end_index=end_index,
+            high=zg,
+            low=zd,
+            level=1,
+        ))
+
+        # 下一中枢从离开笔之后开始（离开笔 = pens[last_in_index+1] 作为下一中枢候选起点）；
+        # 若离开笔是反向笔且能成中枢则成，否则在 while 内滑动跳到下一根反向笔。
+        i = last_in_index + 1
+
+    return zhongshus
+
+
 def identify_zhongshus(pens: List[Pen], klines: List[ClassicChanKline], level = DAY) -> List[ZhongShu]:
     """
-    识别中枢
-    简化实现：至少三笔重叠的区域构成中枢
+    识别笔中枢（段内笔中枢，见 zhongshu.md §3）。
+
+    工程取舍：笔中枢 + 不跨段。先由笔生成段（段边界 = 笔索引边界），
+    再对每一段内的笔子序列单独扫描中枢，天然保证不跨段。
+    段内中枢以「反向笔」起止（缠论图示约定）：向上段中枢形如 X S X，
+    向下段中枢形如 S X S。
+    段未产出时全局回退扫描，避免中枢完全消失（zhongshu.md §3.5）。
+
+    注意：「笔中枢」「不跨段」均为后人/工程取舍，非缠师原文（见 zhongshu.md §0.4/0.5）。
     """
     if len(pens) < 3:
         return []
 
-    zhongshus = []
+    # 先生成段，用段边界约束中枢（不跨段）
+    segments = generate_segments(pens, klines)
 
-    for i in range(len(pens) - 2):
-        pen1, pen2, pen3 = pens[i], pens[i + 1], pens[i + 2]
+    if not segments:
+        # 段未产出 → 全局回退扫描（无段方向先验，用第一笔方向近似）
+        fallback_dir = pens[0].direction
+        return _scan_pens_for_zhongshus(pens, klines, 0, len(pens) - 1, fallback_dir)
 
-        high1 = pen_high(pen1, klines)
-        low1 = pen_low(pen1, klines)
-        high2 = pen_high(pen2, klines)
-        low2 = pen_low(pen2, klines)
-        high3 = pen_high(pen3, klines)
-        low3 = pen_low(pen3, klines)
-
-        # 检查是否有重叠
-        overlap_high = min(high1, high2, high3)
-        overlap_low = max(low1, low2, low3)
-
-        if overlap_high > overlap_low:
-            zhongshus.append(ZhongShu(
-                start_index=pen1.start_index,
-                end_index=pen3.end_index,
-                high=overlap_high,
-                low=overlap_low,
-                level=1
-            ))
+    zhongshus: List[ZhongShu] = []
+    for seg in segments:
+        # 段的 start_index/end_index 是笔索引，构成该段的笔子序列区间
+        seg_pens = _scan_pens_for_zhongshus(
+            pens, klines, seg.start_index, seg.end_index, seg.direction
+        )
+        zhongshus.extend(seg_pens)
 
     return zhongshus
 

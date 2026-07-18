@@ -14,6 +14,7 @@ from app.utils.database import engine
 from app.models.db_model import Base
 from app.service.stock import update_all_stock
 from app.service.data_check import check_data_integrity
+from app.service.migrations import migrate_stock_primary_key
 
 
 def init_tables():
@@ -31,6 +32,13 @@ if __name__ == "__main__":
     import uvicorn
 
     init_tables()
+
+    # stock 表主键迁移 (name,code,market) → (code, market)：幂等、失败不阻断启动。
+    # 在 check_data_integrity 之前运行，使改名重复检查在新 schema 上执行（恒为 0）。
+    try:
+        migrate_stock_primary_key()
+    except Exception as e:
+        print(f"❌ stock 主键迁移失败（已忽略，继续启动）：{e}")
 
     # 数据完整性检查：在 init_tables 之后、update_all_stock 之前运行。
     # 即使 update_all_stock 因 baostock 不可用而失败，检查仍会先执行。

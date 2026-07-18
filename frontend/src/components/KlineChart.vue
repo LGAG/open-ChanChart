@@ -58,7 +58,7 @@ const isFullscreen = ref(false)
 
 // Visibility toggles for Chan theory structures
 const showPens = ref(true)
-const showFractals = ref(true)
+const showFractals = ref(false)
 const showSegments = ref(true)
 const showZhongshu = ref(true)
 
@@ -160,46 +160,28 @@ const updateChart = () => {
     })
   }
 
-  // Prepare zhongshu rectangles
-  const zhongshuSeries = []
-  if (showZhongshu.value && props.chanData.zhongshus) {
+  // Prepare zhongshu rectangles (markArea)
+  // 注意：zs.start_index / zs.end_index 是「缠论K线索引」，需经 chan_klines 映射回
+  // 原始K线索引区间（chan_klines[idx].start ~ .end），才能对齐到 dates 数组。
+  const zhongshuMarkAreas = []
+  if (showZhongshu.value && props.chanData.zhongshus && props.chanData.chan_klines) {
     props.chanData.zhongshus.forEach((zs, index) => {
-      const startKline = props.klineData[zs.start_index]
-      const endKline = props.klineData[zs.end_index]
-      if (startKline && endKline) {
-        zhongshuSeries.push({
-          type: 'line',
-          name: `中枢${index + 1}上沿`,
-          data: dates.map((date, idx) => {
-            if (idx >= zs.start_index && idx <= zs.end_index) {
-              return zs.high
-            }
-            return null
-          }),
-          lineStyle: {
-            color: p.zsh,
-            width: 2,
-            type: 'dashed'
-          },
-          symbol: 'none'
-        })
-        zhongshuSeries.push({
-          type: 'line',
-          name: `中枢${index + 1}下沿`,
-          data: dates.map((date, idx) => {
-            if (idx >= zs.start_index && idx <= zs.end_index) {
-              return zs.low
-            }
-            return null
-          }),
-          lineStyle: {
-            color: p.zsl,
-            width: 2,
-            type: 'dashed'
-          },
-          symbol: 'none'
-        })
-      }
+      const startChanK = props.chanData.chan_klines[zs.start_index]
+      const endChanK = props.chanData.chan_klines[zs.end_index]
+      if (!startChanK || !endChanK) return
+      const rawStart = startChanK.start  // 原始K线索引
+      const rawEnd = endChanK.end        // 原始K线索引
+      if (rawStart == null || rawEnd == null) return
+      zhongshuMarkAreas.push([
+        {
+          xAxis: dates[rawStart],
+          yAxis: zs.low
+        },
+        {
+          xAxis: dates[rawEnd],
+          yAxis: zs.high
+        }
+      ])
     })
   }
 
@@ -327,6 +309,27 @@ const updateChart = () => {
           color0: p.down,
           borderColor: p.up,
           borderColor0: p.down
+        },
+        markArea: {
+          silent: true,
+          // markArea 仅作视觉标注，不进 tooltip、不显示常驻 label
+          // （trigger:'axis' 时常驻 label 会被聚合进 tooltip，导致悬停显示所有中枢）
+          label: { show: false },
+          data: zhongshuMarkAreas.map(area => [
+            {
+              xAxis: area[0].xAxis,
+              yAxis: area[0].yAxis,
+              itemStyle: {
+                color: p.zsh,
+                borderColor: p.zsl,
+                borderWidth: 1.5
+              }
+            },
+            {
+              xAxis: area[1].xAxis,
+              yAxis: area[1].yAxis
+            }
+          ])
         }
       },
       {
@@ -343,8 +346,7 @@ const updateChart = () => {
           },
           opacity: 0.6
         }
-      },
-      ...zhongshuSeries
+      }
     ]
   }
 
@@ -363,7 +365,8 @@ const updateChart = () => {
       symbol: 'circle',
       symbolSize: 6,
       itemStyle: { color: p.pen },
-      connectNulls: false
+      connectNulls: false,
+      clip: true
     })
   }
 
@@ -382,7 +385,8 @@ const updateChart = () => {
       symbol: 'diamond',
       symbolSize: 8,
       itemStyle: { color: p.seg },
-      connectNulls: false
+      connectNulls: false,
+      clip: true
     })
   }
 

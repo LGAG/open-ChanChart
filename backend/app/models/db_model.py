@@ -14,12 +14,11 @@ class Base(DeclarativeBase):
 
 class Stock(Base):
     __tablename__ = "stock"
-    __table_args__ = (
-        Index("idx_code_name", "code", "name"),
-        {"comment": "股票数据表"},
-    )
+    __table_args__ = {"comment": "股票数据表"}
 
-    name: Mapped[str] = mapped_column(String(50), primary_key=True, nullable=False, comment="股票名称")
+    # name 不再属于主键：股票改名后按 (code, market) upsert 会就地覆盖 name，
+    # 避免旧 schema（主键含 name）下改名产生的重复行。
+    name: Mapped[str] = mapped_column(String(50), nullable=False, comment="股票名称")
     code: Mapped[str] = mapped_column(String(20), primary_key=True, nullable=False, comment="股票代码")
     market: Mapped[str] = mapped_column(String(20), primary_key=True, nullable=False, comment="交易所")
 

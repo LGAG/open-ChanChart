@@ -74,6 +74,7 @@ async def get_chan_analysis(
                 "fractals": [f.model_dump() for f in chan_result["fractals"]],
                 "pens": [p.model_dump() for p in chan_result["pens"]],
                 "segments": [s.model_dump() for s in chan_result["segments"]],
+                "zhongshus": [z.model_dump() for z in chan_result["zhongshus"]],
             }
         }
     }

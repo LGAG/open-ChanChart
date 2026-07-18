@@ -1,8 +1,8 @@
 from __future__ import annotations
-import baostock as bs
 import pandas as pd
 from datetime import date, datetime, timedelta
 from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy import case
 from app.utils.database import engine, get_session
 from app.models.db_model import Stock, DayKline, WeekKline, MonthKline, YearKline, get_kline_model, KLINE_MODEL_MAP
 from app.config.config import PERIOD_MAP
@@ -19,20 +19,22 @@ _TIME_TABLE_KEY_DURATION = {
 
 
 def validate_stock(code: str, market: str, name: str | None = None) -> bool:
-    """验证股票是否存在于数据库中，name 不为空时同时校验名称
+    """验证股票是否存在于数据库中（仅按 code + market 判定）
+
+    name 已弱化为展示字段：主键改为 (code, market) 后，同 code+market 不再有多个
+    name，故 name 不再参与存在性校验。同时修复前端持有改名前旧 name 时误判
+    "股票未找到" 的潜在 bug。
 
     Args:
         code: 股票代码
         market: 市场类型 sh/sz
-        name: 股票名称（可选），传入时用于区分同代码不同名称的股票
+        name: 股票名称（可选，保留以兼容 API/前端入参，不再参与校验）
 
     Returns:
-        True 如果股票存在（且 name 匹配），否则 False
+        True 如果 (code, market) 存在，否则 False
     """
     with get_session() as session:
         query = session.query(Stock).filter(Stock.code == code, Stock.market == market)
-        if name is not None:
-            query = query.filter(Stock.name == name)
         return session.query(query.exists()).scalar() is True
 
 
@@ -74,6 +76,7 @@ def _upsert_dataframe(df: pd.DataFrame, model_class) -> None:
 
 def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str, end_timestamp: str):
     try:
+        import baostock as bs  # 延迟导入：baostock 首次导入耗时数秒，避免拖慢模块加载与首搜
         lg = bs.login()
         print('login respond error_code:' + lg.error_code)
         print('login respond  error_msg:' + lg.error_msg)
@@ -142,6 +145,7 @@ def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str
 
 def get_stock_data_daily_bao(code: str, market: str, period: str, start_timestamp: str, end_timestamp: str):
     try:
+        import baostock as bs  # 延迟导入：baostock 首次导入耗时数秒，避免拖慢模块加载与首搜
         lg = bs.login()
         print('login respond error_code:' + lg.error_code)
         print('login respond  error_msg:' + lg.error_msg)
@@ -176,6 +180,7 @@ def update_all_stock(day: str | None = None):
     if day is None:
         day = datetime.now().strftime("%Y-%m-%d")
     try:
+        import baostock as bs  # 延迟导入：baostock 首次导入耗时数秒，避免拖慢模块加载与首搜
         lg = bs.login()
         print('login respond error_code:' + lg.error_code)
         print('login respond  error_msg:' + lg.error_msg)
@@ -213,7 +218,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
         periods: 周期列表，如 ["day", "60F", "30F", "5F"]，为 None 时更新所有周期
         start_date: 开始日期 YYYY-MM-DD，为 None 时从默认日期开始
         end_date: 结束日期 YYYY-MM-DD，为 None 时到今天
-        name: 股票名称（可选），传入时用于区分同代码不同名称的股票
+        name: 股票名称（可选，展示字段，保留以兼容 API/前端入参，不再参与行匹配）
 
     Returns:
         更新结果统计
@@ -237,17 +242,15 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
 
     # 获取股票列表
     if code is not None:
-        if name is not None:
-            # 使用 code + name + market 精确匹配，避免同代码不同股票冲突
-            with get_session() as session:
-                row = session.query(Stock.code, Stock.market, Stock.name).filter(
-                    Stock.code == code, Stock.market == market, Stock.name == name
-                ).first()
-                if row is None:
-                    return {f"{market}.{code}": {"错误": f"未找到股票 {code}({name})"}}
-                stocks = [{"code": row.code, "market": row.market}]
-        else:
-            stocks = [{"code": code, "market": market}]
+        # 仅按 (code, market) 定位；name 已弱化为展示字段，不再参与行匹配。
+        # 仍做一次存在性校验，避免对不存在的股票无谓拉取 baostock。
+        with get_session() as session:
+            row = session.query(Stock.code, Stock.market).filter(
+                Stock.code == code, Stock.market == market
+            ).first()
+            if row is None:
+                return {f"{market}.{code}": {"错误": f"未找到股票 {code}"}}
+            stocks = [{"code": row.code, "market": row.market}]
     else:
         with get_session() as session:
             rows = session.query(Stock.code, Stock.market).all()
@@ -262,6 +265,7 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
         for pd_def in period_defs:
             display_name = pd_def.label
             try:
+                import baostock as bs  # 延迟导入：baostock 首次导入耗时数秒，避免拖慢模块加载与首搜
                 lg = bs.login()
                 baostock_symbol = f"{stock['market']}.{stock['code']}"
 
@@ -453,13 +457,26 @@ def get_stock_data_database(code: str, market: str, period: str, start_timestamp
 
 
 def search_stocks(keyword: str, market: str | None = None, limit: int = 5) -> list[dict]:
-    """搜索股票（按代码或名称模糊匹配）"""
+    """搜索股票（按代码或名称模糊匹配，代码前缀优先排序）
+
+    排序优先级：代码前缀匹配 > 代码包含 > 名称包含，使最相关结果排在前面。
+    关键词去空格后长度 < 2 时直接返回空，避免单字符模糊匹配命中过多噪声。
+    """
+    kw = (keyword or "").strip()
+    if len(kw) < 2:
+        return []
     with get_session() as session:
         query = session.query(Stock)
         if market:
             query = query.filter(Stock.market == market)
         query = query.filter(
-            (Stock.code.contains(keyword)) | (Stock.name.contains(keyword))
+            (Stock.code.contains(kw)) | (Stock.name.contains(kw))
         )
-        stocks = query.limit(limit).all()
+        # CASE 排序：代码前缀(0) < 代码包含(1) < 仅名称包含(2)
+        order_expr = case(
+            (Stock.code.like(f"{kw}%"), 0),
+            (Stock.code.contains(kw), 1),
+            else_=2,
+        )
+        stocks = query.order_by(order_expr, Stock.code).limit(limit).all()
         return [{"name": s.name, "code": s.code, "market": s.market} for s in stocks]

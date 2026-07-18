@@ -1,7 +1,9 @@
 """数据库数据完整性检查（启动期运行，只读，永不阻断启动）
 
 检查项：
-1. 股票改名重复：stock 表中同一 (code, market) 对应多个不同 name（baostock 改名导致）
+1. 股票改名重复：stock 表中同一 (code, market) 对应多个不同 name。
+   主键改为 (code, market) 后此为不变量断言——改名现已按 (code, market) 就地
+   upsert 覆盖 name，结构上不可能再产生重复，恒报 0；若报告 >0 说明迁移回退或人工篡改。
 2. 孤儿 K 线：K 线表中存在 stock 表里完全没有的 (code, market)
 3. 同时刻重复行：K 线表中同一 (time, code, market) 出现多行（旧 schema 缺复合主键时可能残留）
 
@@ -89,8 +91,12 @@ def _total_anomalies(results: dict) -> int:
 def _check_stock_rename_duplicates(session: Session) -> list[dict]:
     """检查 stock 表中 (code, market) 对应多个不同 name 的情况。
 
-    成因：baostock 改名，update_all_stock 以新 (name, code, market) upsert，
-    旧 name 行因主键含 name 而保留，导致同 code+market 出现多条不同 name。
+    不变量断言：主键改为 (code, market) 后结构上不可能产生此类重复（改名按
+    (code, market) 就地 upsert 覆盖 name），故恒返回空列表。保留此检查作为
+    健康态探针：若返回非空说明迁移回退或人工篡改了 stock 表。
+
+    历史成因（已消除）：旧主键含 name，baostock 改名时 update_all_stock 以新
+    (name, code, market) upsert，旧 name 行保留导致同 code+market 出现多行不同 name。
 
     Returns:
         [{"code": str, "market": str, "names": [str, ...]}, ...]
