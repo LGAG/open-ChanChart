@@ -714,3 +714,12 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 </style>
+
+<style>
+/* ECharts 的 canvas 由 zrender 运行时插入,不带 scoped data 属性,scoped 规则无法命中。
+   用全局(非 scoped)规则 + !important 覆盖其 inline cursor,使悬停 K 线图时显示
+   小圆圈光标,避免默认大指针遮挡图形(白环+黑描边,深/浅主题下均可见,热点在圆心)。 */
+.chart-container canvas {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='4' fill='none' stroke='black' stroke-width='3'/%3E%3Ccircle cx='10' cy='10' r='4' fill='none' stroke='white' stroke-width='1'/%3E%3C/svg%3E") 10 10, crosshair !important;
+}
+</style>
