@@ -1,39 +1,47 @@
 <template>
-  <div class="kline-chart" :class="{ 'is-fullscreen': isFullscreen }">
-    <div class="chart-toolbar">
-      <div class="chan-toggles">
-        <label class="toggle-item">
-          <input type="checkbox" v-model="showPens" @change="updateChart" />
-          <span class="toggle-indicator" :style="{ background: palette.pen, boxShadow: '0 0 6px ' + palette.pen }"></span>
-          笔
-        </label>
-        <label class="toggle-item">
-          <input type="checkbox" v-model="showFractals" @change="updateChart" />
-          <span class="toggle-indicator" :style="{ background: 'linear-gradient(135deg,' + palette.up + ' 50%,' + palette.down + ' 50%)' }"></span>
-          分型
-        </label>
-        <label class="toggle-item">
-          <input type="checkbox" v-model="showSegments" @change="updateChart" />
-          <span class="toggle-indicator" :style="{ background: palette.seg, boxShadow: '0 0 6px ' + palette.seg }"></span>
-          段
-        </label>
-        <label class="toggle-item">
-          <input type="checkbox" v-model="showZhongshu" @change="updateChart" />
-          <span class="toggle-indicator" :style="{ background: 'repeating-linear-gradient(90deg,' + palette.zsh + ' 0 4px, transparent 4px 8px)' }"></span>
-          中枢
-        </label>
+  <Teleport to="body" :disabled="!isFullscreen">
+    <div class="kline-chart" :class="{ 'is-fullscreen': isFullscreen }">
+      <div class="chart-toolbar">
+        <div class="chan-toggles">
+          <!-- 一行排开:每个结构一组 = 勾选框(带字,是否参与计算)+ 无字色块按钮(series 显隐) -->
+          <div
+            v-for="btn in seriesToggleBtns"
+            :key="btn.key"
+            class="toggle-group"
+          >
+            <label class="toggle-item">
+              <input
+                type="checkbox"
+                :checked="showVar(btn.showKey).value"
+                @change="showVar(btn.showKey).value = $event.target.checked; updateChart()"
+              />
+              <span class="toggle-indicator" :style="indicatorStyle(btn)"></span>
+              {{ btn.label }}
+            </label>
+            <button
+              class="series-btn"
+              :class="{ active: !seriesHidden[btn.key], disabled: !isSeriesToggleable(btn.key) }"
+              :style="btnStyle(btn)"
+              :disabled="!isSeriesToggleable(btn.key)"
+              :title="btn.label + (seriesHidden[btn.key] ? '(已隐藏)' : '(显示/隐藏)')"
+              @click="toggleSeries(btn.key)"
+            >
+              <span class="series-btn-icon" :style="iconStyle(btn)"></span>
+            </button>
+          </div>
+        </div>
+        <button class="fullscreen-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏展示'">
+          <svg v-if="!isFullscreen" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 4h-4v2h6v-6h-2v4z"/>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M9 3H7v4H3v2h6V3zm8 0h-2v6h6V7h-4V3zM9 21v-6H3v2h4v4h2zm8-4h4v-2h-6v6h2v-4z"/>
+          </svg>
+        </button>
       </div>
-      <button class="fullscreen-btn" @click="toggleFullscreen" :title="isFullscreen ? '退出全屏' : '全屏展示'">
-        <svg v-if="!isFullscreen" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-          <path d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 4h-4v2h6v-6h-2v4z"/>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-          <path d="M9 3H7v4H3v2h6V3zm8 0h-2v6h6V7h-4V3zM9 21v-6H3v2h4v4h2zm8-4h4v-2h-6v6h2v-4z"/>
-        </svg>
-      </button>
+      <div ref="chartRef" class="chart-container"></div>
     </div>
-    <div ref="chartRef" class="chart-container"></div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -56,23 +64,116 @@ const chartRef = ref(null)
 let chartInstance = null
 const isFullscreen = ref(false)
 
-// Visibility toggles for Chan theory structures
+// Theme-driven color palette (re-renders chart on theme change)
+const { currentTheme, themeMeta } = useTheme()
+const palette = computed(() => themeMeta.value.echarts)
+
+// Visibility toggles for Chan theory structures (checkboxes — 是否参与计算)
 const showPens = ref(true)
 const showFractals = ref(false)
 const showSegments = ref(true)
 const showZhongshu = ref(true)
 
-// Theme-driven color palette (re-renders chart on theme change)
-const { currentTheme, themeMeta } = useTheme()
-const palette = computed(() => themeMeta.value.echarts)
+// 图形按钮(series 显隐):点亮=显示该类别所有 series,熄灭=隐藏。
+// 与勾选框是从属关系:勾选框关闭时对应按钮禁用(无数据可显隐)。
+// key 取缠论结构类别名,与左侧 toolbar 的图形按钮一一对应。
+const seriesHidden = ref({
+  pen: false,
+  fractal: false,
+  segment: false,
+  zhongshu: false
+})
+const toggleSeries = (key) => {
+  seriesHidden.value[key] = !seriesHidden.value[key]
+  updateChart()
+}
+// 某类别图形按钮是否可点:仅当对应勾选框开启(该类别参与计算)时才生效
+const isSeriesToggleable = (key) => {
+  switch (key) {
+    case 'pen': return showPens.value
+    case 'fractal': return showFractals.value
+    case 'segment': return showSegments.value
+    case 'zhongshu': return showZhongshu.value
+    default: return false
+  }
+}
+
+// 每个缠论结构一组控件:勾选框(带字,是否参与计算)+ 无字色块按钮(series 显隐)。
+// showKey 映射到对应的 showXxx 响应式变量;key 映射到 seriesHidden 字段。
+const seriesToggleBtns = [
+  { key: 'pen', showKey: 'pens', label: '笔' },
+  { key: 'fractal', showKey: 'fractals', label: '分型' },
+  { key: 'segment', showKey: 'segments', label: '段' },
+  { key: 'zhongshu', showKey: 'zhongshu', label: '中枢' }
+]
+
+// 勾选框绑定的响应式变量(showPens/showFractals/...)— v-model 不能用计算式,需显式 get/set
+const showVar = (showKey) => {
+  switch (showKey) {
+    case 'pens': return showPens
+    case 'fractals': return showFractals
+    case 'segments': return showSegments
+    case 'zhongshu': return showZhongshu
+    default: return showPens
+  }
+}
+
+// 按钮点亮时的主题色。分型由顶/底两色组成,故区分:
+//   solidColor — 纯色,用于边框/发光(boxShadow/border-color 不支持 gradient)
+//   iconBg     — icon 背景,可用 gradient(分型用顶底渐变区分)
+const solidColor = (btn) => {
+  const p = palette.value
+  switch (btn.key) {
+    case 'pen': return p.pen
+    case 'fractal': return p.up
+    case 'segment': return p.seg
+    case 'zhongshu': return p.zsh
+    default: return p.accent
+  }
+}
+const iconBg = (btn) => {
+  const p = palette.value
+  if (btn.key === 'fractal') return `linear-gradient(135deg, ${p.up} 50%, ${p.down} 50%)`
+  return solidColor(btn)
+}
+const btnStyle = (btn) => {
+  const on = !seriesHidden.value[btn.key] && isSeriesToggleable(btn.key)
+  return {
+    borderColor: on ? solidColor(btn) : 'var(--panel-border)',
+    color: on ? 'var(--text)' : 'var(--text-dim)'
+  }
+}
+const iconStyle = (btn) => {
+  const on = !seriesHidden.value[btn.key] && isSeriesToggleable(btn.key)
+  return {
+    background: on ? iconBg(btn) : 'transparent',
+    boxShadow: on ? '0 0 6px ' + solidColor(btn) : 'none'
+  }
+}
+
+// 勾选框旁的色条指示器:复刻原写死颜色(笔/段/中枢纯色+发光,分型顶底渐变)
+const indicatorStyle = (btn) => {
+  const p = palette.value
+  switch (btn.key) {
+    case 'pen': return { background: p.pen, boxShadow: '0 0 6px ' + p.pen }
+    case 'fractal': return { background: `linear-gradient(135deg, ${p.up} 50%, ${p.down} 50%)` }
+    case 'segment': return { background: p.seg, boxShadow: '0 0 6px ' + p.seg }
+    case 'zhongshu': return { background: `repeating-linear-gradient(90deg, ${p.zsh} 0 4px, transparent 4px 8px)` }
+    default: return {}
+  }
+}
 
 const toggleFullscreen = () => {
   isFullscreen.value = !isFullscreen.value
   document.body.style.overflow = isFullscreen.value ? 'hidden' : ''
+  // 全屏切换会触发 Teleport 移动 DOM + CSS 重排，需等重排完成后再 resize。
+  // nextTick 保证 DOM 已移动，requestAnimationFrame 保证布局已结算出正确尺寸。
   nextTick(() => {
-    if (chartInstance) {
-      chartInstance.resize()
-    }
+    requestAnimationFrame(() => {
+      if (chartInstance) {
+        chartInstance.resize()
+      }
+    })
   })
 }
 
@@ -106,17 +207,22 @@ const updateChart = () => {
 
   // Prepare Chan theory data - pen lines as segments
   const penLineData = []
+  const virtualPenLineData = []
   if (showPens.value && props.chanData.pens) {
     props.chanData.pens.forEach(pen => {
       props.chanData.chan_klines[pen.start_index].start
+      const seg = []
       if (pen.direction === 'up') {
-        penLineData.push([pen.start_date, props.chanData.chan_klines[pen.start_index].low])
-        penLineData.push([pen.end_date, props.chanData.chan_klines[pen.end_index].high])
+        seg.push([pen.start_date, props.chanData.chan_klines[pen.start_index].low])
+        seg.push([pen.end_date, props.chanData.chan_klines[pen.end_index].high])
       } else {
-        penLineData.push([pen.start_date, props.chanData.chan_klines[pen.start_index].high])
-        penLineData.push([pen.end_date, props.chanData.chan_klines[pen.end_index].low])
+        seg.push([pen.start_date, props.chanData.chan_klines[pen.start_index].high])
+        seg.push([pen.end_date, props.chanData.chan_klines[pen.end_index].low])
       }
-      penLineData.push([null, null]) // Break line between pens
+      const target = pen.is_sure === false ? virtualPenLineData : penLineData
+      target.push(seg[0])
+      target.push(seg[1])
+      target.push([null, null]) // Break line between pens
     })
   }
 
@@ -164,7 +270,7 @@ const updateChart = () => {
   // 注意：zs.start_index / zs.end_index 是「缠论K线索引」，需经 chan_klines 映射回
   // 原始K线索引区间（chan_klines[idx].start ~ .end），才能对齐到 dates 数组。
   const zhongshuMarkAreas = []
-  if (showZhongshu.value && props.chanData.zhongshus && props.chanData.chan_klines) {
+  if (showZhongshu.value && !seriesHidden.value.zhongshu && props.chanData.zhongshus && props.chanData.chan_klines) {
     props.chanData.zhongshus.forEach((zs, index) => {
       const startChanK = props.chanData.chan_klines[zs.start_index]
       const endChanK = props.chanData.chan_klines[zs.end_index]
@@ -185,22 +291,8 @@ const updateChart = () => {
     })
   }
 
-  // Build legend entries based on visibility
-  const legendData = ['K线']
-  if (showPens.value) legendData.push('笔')
-  if (showSegments.value) legendData.push('段')
-  if (showFractals.value) {
-    legendData.push('顶分型')
-    legendData.push('底分型')
-  }
-
   const option = {
     backgroundColor: p.bg,
-    title: {
-      text: '缠论K线图',
-      left: 'center',
-      textStyle: { color: p.text, fontSize: 15, fontWeight: 600 }
-    },
     tooltip: {
       trigger: 'axis',
       axisPointer: {
@@ -212,24 +304,18 @@ const updateChart = () => {
       borderWidth: 1,
       textStyle: { color: p.text }
     },
-    legend: {
-      data: legendData,
-      top: 30,
-      textStyle: { color: p.text },
-      inactiveColor: '#555'
-    },
     grid: [
       {
-        left: '10%',
-        right: '10%',
-        top: '15%',
-        height: '60%'
+        left: '8%',
+        right: '5%',
+        top: '4%',
+        height: '68%'
       },
       {
-        left: '10%',
-        right: '10%',
-        top: '78%',
-        height: '15%'
+        left: '8%',
+        right: '5%',
+        top: '75%',
+        height: '14%'
       }
     ],
     xAxis: [
@@ -351,7 +437,7 @@ const updateChart = () => {
   }
 
   // Add pen lines
-  if (penLineData.length > 0) {
+  if (penLineData.length > 0 && !seriesHidden.value.pen) {
     option.series.push({
       name: '笔',
       type: 'line',
@@ -370,8 +456,30 @@ const updateChart = () => {
     })
   }
 
+  // Add virtual (unconfirmed) pen lines — dashed, follows 笔 toggle
+  if (virtualPenLineData.length > 0 && !seriesHidden.value.pen) {
+    option.series.push({
+      name: '笔(未确认)',
+      type: 'line',
+      data: virtualPenLineData,
+      lineStyle: {
+        color: p.pen,
+        width: 2,
+        type: 'dashed',
+        opacity: 0.6,
+        shadowColor: p.pen,
+        shadowBlur: 4
+      },
+      symbol: 'circle',
+      symbolSize: 5,
+      itemStyle: { color: p.pen },
+      connectNulls: false,
+      clip: true
+    })
+  }
+
   // Add segment lines (connected polyline)
-  if (segmentLineData.length > 0) {
+  if (segmentLineData.length > 0 && !seriesHidden.value.segment) {
     option.series.push({
       name: '段',
       type: 'line',
@@ -391,7 +499,7 @@ const updateChart = () => {
   }
 
   // Add fractal markers
-  if (topFractals.length > 0) {
+  if (topFractals.length > 0 && !seriesHidden.value.fractal) {
     option.series.push({
       name: '顶分型',
       type: 'scatter',
@@ -407,7 +515,7 @@ const updateChart = () => {
     })
   }
 
-  if (bottomFractals.length > 0) {
+  if (bottomFractals.length > 0 && !seriesHidden.value.fractal) {
     option.series.push({
       name: '底分型',
       type: 'scatter',
@@ -476,6 +584,14 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 16px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+/* 每组:勾选框(带字)+ 紧邻的无字色块按钮 */
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .toggle-item {
@@ -502,6 +618,38 @@ onBeforeUnmount(() => {
   height: 4px;
   border-radius: 2px;
   flex-shrink: 0;
+}
+
+.series-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+}
+
+.series-btn:hover:not(.disabled) {
+  filter: brightness(1.15);
+}
+
+.series-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.series-btn-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
 }
 
 .fullscreen-btn {
@@ -540,10 +688,19 @@ onBeforeUnmount(() => {
   z-index: 9999;
   background: var(--bg);
   padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 全屏下 toolbar 自适应高度,图表填满剩余空间(不依赖固定像素差) */
+.kline-chart.is-fullscreen .chart-toolbar {
+  flex-shrink: 0;
 }
 
 .kline-chart.is-fullscreen .chart-container {
-  height: calc(100% - 48px);
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .kline-chart.is-fullscreen .chart-toolbar {

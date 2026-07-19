@@ -31,3 +31,9 @@ MYSQL_DATABASE = _mysql_cfg.get("database", "chan")
 
 _period_map_cfg = _cfg.get("period_map", {}) if isinstance(_cfg, dict) else {}
 PERIOD_MAP: dict[str, str] = {str(k): str(v) for k, v in _period_map_cfg.items()}
+
+# baostock 限流配置：全量更新时控制请求速率，避免被封IP
+_baostock_cfg = _cfg.get("baostock", {}) if isinstance(_cfg, dict) else {}
+BAOSTOCK_QPS_INTERVAL: float = float(_baostock_cfg.get("qps_interval", 0.3))
+BAOSTOCK_MAX_RETRIES: int = int(_baostock_cfg.get("max_retries", 3))
+BAOSTOCK_RETRY_BASE_DELAY: float = float(_baostock_cfg.get("retry_base_delay", 1.0))

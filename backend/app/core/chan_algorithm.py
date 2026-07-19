@@ -152,6 +152,58 @@ def identify_fractals(klines: List[ClassicChanKline], raw_klines: List[KlineData
     return fractals
 
 
+def _build_virtual_fractal(
+    fractals: List[Fractal],
+    klines: List[ClassicChanKline],
+    raw_klines: List[KlineData],
+) -> Fractal | None:
+    """
+    构造尾部虚拟分型,利用最后确定分型之后被丢弃的K线。
+
+    缠论分型需 3 根K线确认,最后一根缠论K线无"右侧"无法确认分型,
+    导致尾部K线无法形成笔结构。本函数预测一个虚拟分型塞进 fractals,
+    让 generate_new_pens 自行决定:同向延伸最后一笔,或新增反向虚拟笔。
+
+    虚拟分型中心固定 = 最新缠论K线 klines[n-1],其左 = klines[n-2],
+    "右"是假设的未来K线(不存在)。方向由尾部相对最后确定分型的走势决定:
+      最后分型 top    且尾部创同向新高(center.high > last.high) → 虚拟 top(延伸)
+                      否则                                         → 虚拟 bottom(反向虚拟笔)
+      最后分型 bottom 且尾部创同向新低(center.low < last.low)     → 虚拟 bottom(延伸)
+                      否则                                         → 虚拟 top(反向虚拟笔)
+
+    返回 None 的情形:无分型 / 尾部不足2根(无法作左/中)。
+    """
+    if not fractals or not klines:
+        return None
+
+    n = len(klines)
+    last_f = fractals[-1]
+    f_idx = last_f.index
+    # 中心 = klines[n-1],左 = klines[n-2],需 f_idx <= n-3
+    if n - 1 - f_idx < 2:
+        return None
+
+    center = klines[n - 1]
+    last = klines[f_idx]
+
+    # 按尾部走势决定虚拟分型方向
+    if last_f.type == "top":
+        v_type = "top" if center.high > last.high else "bottom"
+    else:  # bottom
+        v_type = "bottom" if center.low < last.low else "top"
+
+    k_index = center.end  # 与 identify_fractals 取 curr_k.end 一致;虚拟分型未确认,无需回溯极值
+    date = raw_klines[k_index].date
+
+    return Fractal(
+        index=n - 1,
+        k_index=k_index,
+        date=date,
+        type=v_type,
+        is_sure=False,
+    )
+
+
 def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -> List[Pen]:
     """
     生成笔（三步法）
@@ -210,6 +262,7 @@ def generate_new_pens(fractals: List[Fractal], klines: List[ClassicChanKline]) -
             start_date=f1.date,
             end_date=f2.date,
             direction=direction,
+            is_sure=f1.is_sure and f2.is_sure,
         ))
 
     return pens
@@ -811,6 +864,11 @@ def calculate_chan_data(klines: List[KlineData], level = DAY) -> dict:
         print(kline)
     # 2. 识别分型
     fractals = identify_fractals(processed_klines, klines)
+
+    # 2.5 追加虚拟分型(尾部K线利用):让笔算法自行决定延伸最后一笔或新增虚拟笔
+    virtual_fractal = _build_virtual_fractal(fractals, processed_klines, klines)
+    if virtual_fractal is not None:
+        fractals.append(virtual_fractal)
 
     # 3. 生成笔并校验（消除平行笔）
     pens = generate_new_pens(fractals, processed_klines)

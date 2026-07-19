@@ -17,6 +17,7 @@ class Fractal(BaseModel):
     k_index: int = Field(..., description="K线索引")
     date: str = Field(..., description="日期")
     type: str = Field(..., description="分型类型 top/bottom")
+    is_sure: bool = Field(default=True, description="是否确认分型(True=确定/False=虚拟)")
 
 
 class Pen(BaseModel):
@@ -26,6 +27,7 @@ class Pen(BaseModel):
     start_date: str = Field(..., description="起始日期")
     end_date: str = Field(..., description="结束日期")
     direction: str = Field(..., description="方向 up/down")
+    is_sure: bool = Field(default=True, description="是否确认笔(True=确定笔/False=虚拟笔)")
 
 
 class Segment(BaseModel):

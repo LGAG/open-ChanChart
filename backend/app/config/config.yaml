@@ -11,6 +11,15 @@ mysql:
   password: root
   database: chan
 
+# baostock 数据源限流配置（全量更新股票数据时控制请求速率，避免被封IP）
+# - qps_interval: 两次 query 之间的间隔(秒)，约 3 req/s（baostock 免费数据源经验值）
+# - max_retries: 单次查询失败最大重试次数
+# - retry_base_delay: 重试退避起始间隔(秒)，每次翻倍（如 1/2/4）
+baostock:
+  qps_interval: 0.3
+  max_retries: 3
+  retry_base_delay: 1.0
+
 # 周期映射：将前端/API传入的不规范周期名称映射为baostock所需的频率值
 # baostock支持的频率值：d=日K, w=周K, m=月K, 5=5分钟, 15=15分钟, 30=30分钟, 60=60分钟
 period_map:

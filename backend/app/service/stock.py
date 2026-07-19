@@ -1,11 +1,17 @@
 from __future__ import annotations
+import time
 import pandas as pd
 from datetime import date, datetime, timedelta
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy import case
 from app.utils.database import engine, get_session
 from app.models.db_model import Stock, DayKline, WeekKline, MonthKline, YearKline, get_kline_model, KLINE_MODEL_MAP
-from app.config.config import PERIOD_MAP
+from app.config.config import (
+    PERIOD_MAP,
+    BAOSTOCK_QPS_INTERVAL,
+    BAOSTOCK_MAX_RETRIES,
+    BAOSTOCK_RETRY_BASE_DELAY,
+)
 from app.models.period import SUPPORTED_PERIODS, resolve_period
 
 # 时间类周期（按 start_time/end_time 存储），其余为日期类（按 date 存储）。
@@ -72,6 +78,38 @@ def _upsert_dataframe(df: pd.DataFrame, model_class) -> None:
     with engine.connect() as conn:
         conn.execute(upsert_stmt)
         conn.commit()
+
+
+def _query_with_throttle(query_fn):
+    """对 baostock 查询做 QPS 节流 + 失败重试（指数退避）。
+
+    baostock 为免费数据源，无间隔连续请求易被限流/封IP。本包装：
+    1. 执行查询；2. 若返回 None/异常则按指数退避重试至多 max_retries 次；
+    3. 成功后 sleep qps_interval，控制整体请求速率。
+
+    Args:
+        query_fn: 无参可调用，返回 baostock 结果集（rs）或 None/抛异常
+
+    Returns:
+        baostock 结果集 rs，或 None（重试耗尽仍失败）
+    """
+    last_err: Exception | None = None
+    for attempt in range(BAOSTOCK_MAX_RETRIES + 1):
+        try:
+            rs = query_fn()
+            if rs is not None:
+                time.sleep(BAOSTOCK_QPS_INTERVAL)
+                return rs
+            last_err = RuntimeError("baostock 返回 None")
+        except Exception as e:
+            last_err = e
+        # 重试退避：base * 2^attempt（1s/2s/4s...），最后一次失败不再等待
+        if attempt < BAOSTOCK_MAX_RETRIES:
+            delay = BAOSTOCK_RETRY_BASE_DELAY * (2 ** attempt)
+            print(f"baostock 查询失败({last_err})，第 {attempt + 1}/{BAOSTOCK_MAX_RETRIES} 次重试，等待 {delay}s")
+            time.sleep(delay)
+    print(f"baostock 查询重试耗尽，放弃: {last_err}")
+    return None
 
 
 def get_stock_data_bao(code: str, market: str, period: str, start_timestamp: str, end_timestamp: str):
@@ -258,81 +296,89 @@ def update_kline_data(code: str | None = None, market: str = "sh", periods: list
 
     results: dict[str, dict[str, str]] = {}
 
-    for stock in stocks:
-        stock_key = f"{stock['market']}.{stock['code']}"
-        stock_results: dict[str, str] = {}
+    # baostock 登录态全局：全量更新期间只 login/logout 一次，
+    # 避免数千只股票 × 多周期逐次 login/logout 的抖动（见 _query_with_throttle 的 QPS 节流）。
+    import baostock as bs  # 延迟导入：baostock 首次导入耗时数秒，避免拖慢模块加载
+    lg = bs.login()
+    print('login respond error_code:' + lg.error_code)
+    print('login respond  error_msg:' + lg.error_msg)
+    try:
+        for stock in stocks:
+            stock_key = f"{stock['market']}.{stock['code']}"
+            stock_results: dict[str, str] = {}
 
-        for pd_def in period_defs:
-            display_name = pd_def.label
-            try:
-                import baostock as bs  # 延迟导入：baostock 首次导入耗时数秒，避免拖慢模块加载与首搜
-                lg = bs.login()
-                baostock_symbol = f"{stock['market']}.{stock['code']}"
+            for pd_def in period_defs:
+                display_name = pd_def.label
+                try:
+                    baostock_symbol = f"{stock['market']}.{stock['code']}"
 
-                if pd_def.table_key in _TIME_PERIOD_TABLE_KEYS:
-                    # 时间类周期（hour/half/five_min）：按 time 列取数，存 start_time/end_time
-                    rs = bs.query_history_k_data_plus(
-                        baostock_symbol,
-                        "time,code,open,high,low,close,volume",
-                        start_date=start_date, end_date=end_date,
-                        frequency=pd_def.baostock_freq, adjustflag="3"
-                    )
-                    df = _rs_to_dataframe(rs)
-                    if df.empty:
-                        stock_results[display_name] = "无数据"
-                        continue
-                    timedelta_val = _TIME_TABLE_KEY_DURATION[pd_def.table_key]
-                    df['period'] = pd_def.table_key
-                    df['level'] = pd_def.level
-                    df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
-                    df['market'] = df['market'].str.lower()
-                    df['end_time'] = df['time'].apply(parse_time_to_minute)
-                    df['start_time'] = df['end_time'] - timedelta_val
-                    df['start_time'] = df['start_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
-                    df['end_time'] = df['end_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
-                    df = df.drop(columns=['code', 'time'])
-                    df.rename(columns={'new_code': 'code'}, inplace=True)
+                    if pd_def.table_key in _TIME_PERIOD_TABLE_KEYS:
+                        # 时间类周期（hour/half/five_min）：按 time 列取数，存 start_time/end_time
+                        rs = _query_with_throttle(lambda: bs.query_history_k_data_plus(
+                            baostock_symbol,
+                            "time,code,open,high,low,close,volume",
+                            start_date=start_date, end_date=end_date,
+                            frequency=pd_def.baostock_freq, adjustflag="3"
+                        ))
+                        if rs is None:
+                            stock_results[display_name] = "查询失败"
+                            continue
+                        df = _rs_to_dataframe(rs)
+                        if df.empty:
+                            stock_results[display_name] = "无数据"
+                            continue
+                        timedelta_val = _TIME_TABLE_KEY_DURATION[pd_def.table_key]
+                        df['period'] = pd_def.table_key
+                        df['level'] = pd_def.level
+                        df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
+                        df['market'] = df['market'].str.lower()
+                        df['end_time'] = df['time'].apply(parse_time_to_minute)
+                        df['start_time'] = df['end_time'] - timedelta_val
+                        df['start_time'] = df['start_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
+                        df['end_time'] = df['end_time'].dt.strftime("%Y-%m-%d %H:%M:%S")
+                        df = df.drop(columns=['code', 'time'])
+                        df.rename(columns={'new_code': 'code'}, inplace=True)
 
-                    model_class = KLINE_MODEL_MAP.get(pd_def.table_key)
-                    if model_class:
-                        _upsert_dataframe(df, model_class)
+                        model_class = KLINE_MODEL_MAP.get(pd_def.table_key)
+                        if model_class:
+                            _upsert_dataframe(df, model_class)
 
-                else:
-                    # 日期类周期（day/week/month/year）：按 date 列取数
-                    rs = bs.query_history_k_data_plus(
-                        baostock_symbol,
-                        "date,code,open,high,low,close,volume",
-                        start_date=start_date, end_date=end_date,
-                        frequency=pd_def.baostock_freq, adjustflag="3"
-                    )
-                    if rs is None:
-                        stock_results[display_name] = "查询失败"
-                        continue
-                    df = _rs_to_dataframe(rs)
-                    if df.empty:
-                        stock_results[display_name] = "无数据"
-                        continue
-                    df['volume'] = df['volume'].astype(str).replace({'': '0', 'nan': '0', 'None': '0'})
-                    df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
-                    df['period'] = pd_def.table_key
-                    df['level'] = pd_def.level
-                    df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
-                    df['market'] = df['market'].str.lower()
-                    df = df.drop(columns=['code'])
-                    df.rename(columns={'new_code': 'code'}, inplace=True)
+                    else:
+                        # 日期类周期（day/week/month/year）：按 date 列取数
+                        rs = _query_with_throttle(lambda: bs.query_history_k_data_plus(
+                            baostock_symbol,
+                            "date,code,open,high,low,close,volume",
+                            start_date=start_date, end_date=end_date,
+                            frequency=pd_def.baostock_freq, adjustflag="3"
+                        ))
+                        if rs is None:
+                            stock_results[display_name] = "查询失败"
+                            continue
+                        df = _rs_to_dataframe(rs)
+                        if df.empty:
+                            stock_results[display_name] = "无数据"
+                            continue
+                        df['volume'] = df['volume'].astype(str).replace({'': '0', 'nan': '0', 'None': '0'})
+                        df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
+                        df['period'] = pd_def.table_key
+                        df['level'] = pd_def.level
+                        df[['market', 'new_code']] = df['code'].str.split('.', expand=True)
+                        df['market'] = df['market'].str.lower()
+                        df = df.drop(columns=['code'])
+                        df.rename(columns={'new_code': 'code'}, inplace=True)
 
-                    model_class = KLINE_MODEL_MAP.get(pd_def.table_key)
-                    if model_class:
-                        _upsert_dataframe(df, model_class)
+                        model_class = KLINE_MODEL_MAP.get(pd_def.table_key)
+                        if model_class:
+                            _upsert_dataframe(df, model_class)
 
-                stock_results[display_name] = f"成功({len(df)}条)"
+                    stock_results[display_name] = f"成功({len(df)}条)"
 
-            except Exception as e:
-                stock_results[display_name] = f"失败: {e}"
-            finally:
-                bs.logout()
+                except Exception as e:
+                    stock_results[display_name] = f"失败: {e}"
 
-        results[stock_key] = stock_results
+            results[stock_key] = stock_results
+    finally:
+        bs.logout()
 
     return results
 

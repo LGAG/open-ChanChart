@@ -196,6 +196,8 @@ def validate_pens(pens: List[Pen], klines: List[ClassicChanKline]) -> List[Pen]:
                     if klines[curr.end_index].low < klines[prev.end_index].low:
                         prev.end_index = curr.end_index
                         prev.end_date = curr.end_date
+                # 任一笔涉及虚拟分型则合并后仍为虚拟笔
+                prev.is_sure = prev.is_sure and curr.is_sure
                 changed = True
             else:
                 result.append(curr)
@@ -315,21 +317,17 @@ def _process_char_sequence_inclusion(elements: List[CharElement], seg_direction:
     """
     对特征序列进行包含关系处理，生成标准特征序列。
 
-    先验假设：特征序列的趋势方向与段方向一致。
-    - 向上段的特征序列（X序列）整体呈上升趋势 → 默认 direction="up"
-    - 向下段的特征序列（S序列）整体呈下降趋势 → 默认 direction="down"
+    合并方向整段固定为段方向（不随局部无包含对的相对高低翻转）：
+    - 向上段的特征序列（X序列）始终按上升趋势合并 → 取 high 中较高的 high、low 中较高的 low
+    - 向下段的特征序列（S序列）始终按下降趋势合并 → 取 high 中较低的 high、low 中较低的 low
 
-    这是因为：
-    - 向上段中，相邻向上笔 Sᵢ 与 Sᵢ₊₁ 之间必然有重合区间，推动 X 序列低点逐步抬高
-    - 向下段中，相邻向下笔 Xᵢ 与 Xᵢ₊₁ 之间必然有重合区间，推动 S 序列高点逐步降低
-
-    包含处理规则：
-    - 上升趋势：取 high 中较高的 high，取 low 中较高的 low
-    - 下降趋势：取 high 中较低的 high，取 low 中较低的 low
+    依据：向上段中相邻向上笔 Sᵢ 与 Sᵢ₊₁ 之间必然有重合区间，推动 X 序列低点逐步抬高，
+    故整段 X 序列呈上升趋势；向下段对称。因此包含方向整段固定为段方向，避免在见顶回落
+    附近被局部相对高低误翻，抹掉本该成型的分型。
 
     Args:
         elements: 原始特征序列
-        seg_direction: 段方向，"up" 或 "down"，决定包含处理的默认趋势方向
+        seg_direction: 段方向，"up" 或 "down"，决定整段固定的合并方向
     """
     if len(elements) < 2:
         return elements[:]
@@ -339,7 +337,7 @@ def _process_char_sequence_inclusion(elements: List[CharElement], seg_direction:
         high=elements[0].high,
         low=elements[0].low,
     )]
-    direction = seg_direction  # 先验方向：向上段特征序列默认上升，向下段特征序列默认下降
+    direction = seg_direction  # 整段固定方向：不随无包含对的相对高低翻转
 
     for i in range(1, len(elements)):
         curr = elements[i]
@@ -350,18 +348,14 @@ def _process_char_sequence_inclusion(elements: List[CharElement], seg_direction:
                        (curr.high >= prev.high and curr.low <= prev.low)
 
         if not is_contained:
-            # 无包含关系，确定方向
-            if curr.high > prev.high:
-                direction = "up"
-            elif curr.high < prev.high:
-                direction = "down"
+            # 无包含关系：直接追加，方向不再更新（整段固定为段方向）
             result.append(CharElement(
                 pen_indices=curr.pen_indices[:],
                 high=curr.high,
                 low=curr.low,
             ))
         else:
-            # 有包含关系，根据方向处理
+            # 有包含关系，按整段固定方向处理
             # 合并 pen_indices：上升取后者的索引（极值在后者），下降取前者的索引（极值在前者）
             if direction == "up":
                 new_elem = CharElement(
