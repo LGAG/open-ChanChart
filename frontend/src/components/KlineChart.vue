@@ -64,6 +64,10 @@ const chartRef = ref(null)
 let chartInstance = null
 const isFullscreen = ref(false)
 
+// 用户当前缩放(由 dataZoom 事件实时保存)。toggle 显隐时回写以保留缩放;
+// 换股票时清空(null)重置回整个周期。null → 用默认 0~100。
+const savedZoom = ref(null)
+
 // Theme-driven color palette (re-renders chart on theme change)
 const { currentTheme, themeMeta } = useTheme()
 const palette = computed(() => themeMeta.value.echarts)
@@ -187,13 +191,32 @@ const initChart = () => {
   if (!chartRef.value) return
 
   chartInstance = echarts.init(chartRef.value)
+  // 用户每次缩放(滑块/滚轮)实时保存 start/end,toggle 显隐重建 option 时回写,
+  // 避免缩放被重置回整个周期。
+  chartInstance.on('dataZoom', () => {
+    const dz = chartInstance.getOption().dataZoom
+    if (dz && dz.length) {
+      savedZoom.value = { start: dz[0].start, end: dz[0].end }
+    }
+  })
   updateChart()
 }
 
-const updateChart = () => {
+const updateChart = (preserveZoom = true) => {
   if (!chartInstance || !props.klineData.length) return
 
   const p = palette.value
+
+  // 保留用户当前缩放:toggle 缠论结构显隐会整体重建 option(setOption notMerge),
+  // 若不回写 dataZoom 的 start/end,ECharts 会重置回 0~100(整个周期),丢失缩放。
+  // 缩放值由 dataZoom 事件实时存入 savedZoom(ref),updateChart 读取回写,
+  // 避免在首次渲染时对空实例调 getOption()。
+  // 换股票/换周期(preserveZoom=false)时清空 savedZoom 重置回全量。
+  if (!preserveZoom) {
+    savedZoom.value = null
+  }
+  const zoomStart = savedZoom.value ? savedZoom.value.start : 0
+  const zoomEnd = savedZoom.value ? savedZoom.value.end : 100
 
   // Prepare K-line data
   const dates = props.klineData.map(item => item.date)
@@ -369,16 +392,16 @@ const updateChart = () => {
       {
         type: 'inside',
         xAxisIndex: [0, 1],
-        start: 0,
-        end: 100
+        start: zoomStart,
+        end: zoomEnd
       },
       {
         show: true,
         xAxisIndex: [0, 1],
         type: 'slider',
         top: '93%',
-        start: 0,
-        end: 100,
+        start: zoomStart,
+        end: zoomEnd,
         dataBackground: { lineStyle: { color: p.axis }, areaStyle: { color: p.split } },
         fillerColor: p.split,
         borderColor: p.axis,
@@ -533,8 +556,14 @@ const updateChart = () => {
   chartInstance.setOption(option, true)
 }
 
-watch(() => [props.klineData, props.chanData], () => {
-  updateChart()
+// 换股票/换周期:klineData 引用变化 → 重置缩放回整个周期(看全貌)
+watch(() => props.klineData, () => {
+  updateChart(false)
+}, { deep: true })
+
+// chanData 变化(同股票重新分析等)→ 保留当前缩放
+watch(() => props.chanData, () => {
+  updateChart(true)
 }, { deep: true })
 
 // Re-render with new palette when the theme changes
