@@ -588,83 +588,126 @@ def _find_extremum_pen_idx(elem: "CharElement", extremum_type: str,
     return best_idx
 
 
+def _gap_filled_by_third(first: "CharElement", second: "CharElement",
+                         third: "CharElement") -> bool:
+    """
+    判断分型第三元素 third 是否回补了 first 与 second 之间的缺口。
+
+    缠论第二种情况的"缺口"本意是判断分型是否真正反转。first 与 second 之间
+    若有价格缺口（无重合区间），但第三元素 third 的价格区间已覆盖该缺口，
+    则缺口已被回补、价格连续，应按第一种情况（无缺口）直接确认，不再要求
+    反向验证序列。仅当 first-second 有缺口且 third 也未回补时，才是真缺口。
+
+    缺口区间 = [min(first.high, second.high), max(first.low, second.low)]
+    （下面那根的 high 为下沿，上面那根的 low 为上沿）。
+    third 回补 = third 价格区间与缺口区间有交集。
+
+    Args:
+        first: 分型第一元素
+        second: 分型第二元素（极值/峰值/谷值）
+        third: 分型第三元素
+
+    Returns:
+        True 表示缺口已被 third 回补（视为无缺口）；False 表示真缺口未回补。
+        若 first-second 本身无缺口，也返回 True（无需回补）。
+    """
+    # first 与 second 无缺口 → 不存在缺口，无需 third 回补
+    if not _has_gap(first, second):
+        return True
+    gap_lo = min(first.high, second.high)
+    gap_hi = max(first.low, second.low)
+    # third 与缺口区间有交集即视为回补
+    return third.high >= gap_lo and third.low <= gap_hi
+
+
 def _find_segment_end(pens: List[Pen], klines: List[ClassicChanKline],
                       seg_start: int, seg_direction: str) -> int | None:
     """
     从 seg_start 开始，用特征序列法寻找当前段的结束笔索引。
 
-    向上段：在特征序列（向下笔）中找顶分型，在第二元素的极值笔（最高点）处划分
-    向下段：在特征序列（向上笔）中找底分型，在第二元素的极值笔（最低点）处划分
+    核心判据——「首个回落对即断」：扫描包含处理后的标准特征序列 std_seq，
+    从左到右找第一个相邻回落对 (std_seq[i-1], std_seq[i])：
+      - 向上段（特征序列=向下笔 X）：curr.high < prev.high 且 curr.low < prev.low
+        → prev 是峰值元素（迄今最高的向下笔），段在 prev 的极值笔（最高点）处见顶
+      - 向下段（特征序列=向上笔 S）：curr.high > prev.high 且 curr.low > prev.low
+        → prev 是谷值元素，段在 prev 的极值笔（最低点）处见底
 
-    包含处理后，标准特征序列的一个元素可能由多个原始笔合并而来，
-    因此需要在第二元素的 pen_indices 中找到极值笔，而不是直接取 pen_index。
+    3 元素分型 X1<X2>X3 是该判据的特例（回落对落在 (X2,X3)，峰值 X2）。
+    把反向笔逐个放入特征序列时，一旦新元素完全回落，段就已结束——无论下一笔
+    是底分型、更低还是包含，都不改变「prev 是迄今极值」的事实。
 
-    找到分型后：
-    - 第一种情况（第一元素和第二元素之间无缺口）：段在极值笔处结束
-    - 第二种情况（有缺口）：需要构造反向验证序列，出现分型才确认结束
+    段结束笔索引 = 极值笔的前一笔（段以同向笔结束）：end_idx = extremum_pen_idx - 1。
+
+    缺口验证（缠论第二种情况）：仅当回落对有前驱（i>=2，first=std_seq[i-2]）
+    且 first 与 peak 之间有缺口时，需构造反向验证序列、出现分型才确认；
+    无缺口（第一种情况）或 2 元素边界（i==1，无前驱，无法判缺口）直接确认。
+    缺口判定纳入第三元素 third=curr_e 回补：若 third 价格区间已覆盖 first-peak
+    的缺口，视为缺口被回补（价格连续），按第一种情况直接确认，不走反向验证。
+    包含处理后一个元素可能由多个原始笔合并，故在 peak 元素的 pen_indices 中
+    找极值笔，而非直接取首笔。
 
     Returns:
         段结束笔索引（包含在该段内），若未找到返回 None
     """
-    # 构建特征序列
-    # 主特征序列开启 include_prev_pen：当前段非首段时，将前段末笔（反向笔）
-    # 纳入特征序列首部，避免段首几笔因包含合并丢失分型而误延展段终点。
-    char_seq = _build_char_sequence(pens, seg_start, seg_direction, klines,
-                                    include_prev_pen=True)
-    if len(char_seq) < 3:
-        # 特征序列不足3个元素，无法形成分型
+    # 构建特征序列（段内反向笔，不再前置前段末笔——回落对判据已足够泛化）
+    char_seq = _build_char_sequence(pens, seg_start, seg_direction, klines)
+    if len(char_seq) < 2:
+        # 特征序列不足2个元素，无法形成回落对
         return None
 
     # 包含处理 → 标准特征序列（传入段方向作为先验趋势方向）
     std_seq = _process_char_sequence_inclusion(char_seq, seg_direction)
-    if len(std_seq) < 3:
+    if len(std_seq) < 2:
         return None
 
-    # 识别分型
-    target_fractal_type = "top" if seg_direction == "up" else "bottom"
-    char_fractals = _identify_char_fractals(std_seq)
+    # 向上段找最高点（极值笔 high），向下段找最低点（极值笔 low）
+    extremum_type = "high" if seg_direction == "up" else "low"
 
-    for fractal in char_fractals:
-        if fractal.type != target_fractal_type:
+    # 左到右扫描首个回落对
+    for i in range(1, len(std_seq)):
+        prev_e = std_seq[i - 1]  # 候选峰值/谷值元素（段极值侧）
+        curr_e = std_seq[i]      # 回落侧
+
+        # 回落对判据
+        if seg_direction == "up":
+            is_regression = curr_e.high < prev_e.high and curr_e.low < prev_e.low
+        else:  # "down"
+            is_regression = curr_e.high > prev_e.high and curr_e.low > prev_e.low
+        if not is_regression:
             continue
 
-        # 在第二元素的 pen_indices 中找到极值笔
-        # 向上段顶分型 → 找最高点对应的笔
-        # 向下段底分型 → 找最低点对应的笔
-        extremum_type = "high" if seg_direction == "up" else "low"
-        extremum_pen_idx = _find_extremum_pen_idx(fractal.second_elem, extremum_type, pens, klines)
+        peak_e = prev_e
+        extremum_pen_idx = _find_extremum_pen_idx(peak_e, extremum_type, pens, klines)
 
-        # 判断第一元素和第二元素之间是否有缺口
-        has_gap = _has_gap(fractal.first_elem, fractal.second_elem)
+        # 缺口验证（第二种情况），仅 i>=2 有前驱时
+        if i >= 2:
+            first_e = std_seq[i - 2]
+            # 缺口判定纳入第三元素 curr_e 回补：first-peak 有缺口但 curr_e 已
+            # 覆盖该缺口 → 视为无缺口（第一种情况），直接确认，不走反向验证。
+            if _has_gap(first_e, peak_e) and not _gap_filled_by_third(first_e, peak_e, curr_e):
+                # 真缺口未回补 → 从极值笔开始构造反向段特征序列，出现分型才确认
+                reverse_dir = "down" if seg_direction == "up" else "up"
+                verify_char_seq = _build_char_sequence(pens, extremum_pen_idx, reverse_dir, klines)
+                if len(verify_char_seq) < 3:
+                    # 验证序列不足以形成分型，当前段继续，尝试下一个回落对
+                    continue
+                verify_std_seq = _process_char_sequence_inclusion(verify_char_seq, reverse_dir)
+                if len(verify_std_seq) < 3:
+                    continue
+                # 反向段只需出现任意分型即可确认（不区分第一/二种情况）
+                if not _identify_char_fractals(verify_std_seq):
+                    continue
+                # 验证通过 → 落到下方确认
+            # 无缺口 / 缺口被 third 回补（第一种情况）→ 落到下方确认
+        # i==1（2 元素边界，无前驱）→ 直接确认
 
-        if not has_gap:
-            # ---- 第一种情况：无缺口，段在极值笔处结束 ----
-            # 段结束笔索引 = 极值笔的前一笔（因为段以同向笔结束）
-            end_idx = extremum_pen_idx - 1
-            pen_count = end_idx - seg_start + 1
-            if pen_count >= 3 and pen_count % 2 == 1:
-                return end_idx
-        else:
-            # ---- 第二种情况：有缺口，需要验证 ----
-            # 从极值笔开始，构造反向段的特征序列
-            reverse_dir = "down" if seg_direction == "up" else "up"
-            verify_char_seq = _build_char_sequence(pens, extremum_pen_idx, reverse_dir, klines)
-            if len(verify_char_seq) < 3:
-                # 验证序列不足以形成分型，当前段继续
-                continue
-
-            verify_std_seq = _process_char_sequence_inclusion(verify_char_seq, reverse_dir)
-            if len(verify_std_seq) < 3:
-                continue
-
-            verify_fractals = _identify_char_fractals(verify_std_seq)
-            # 反向段只需出现任意分型即可确认（不区分第一/二种情况）
-            if verify_fractals:
-                end_idx = extremum_pen_idx - 1
-                pen_count = end_idx - seg_start + 1
-                if pen_count >= 3 and pen_count % 2 == 1:
-                    return end_idx
-            # 验证序列中未出现分型，当前段继续，尝试下一个分型
+        # ---- 确认段结束 ----
+        # 段结束笔索引 = 极值笔的前一笔（段以同向笔结束）
+        end_idx = extremum_pen_idx - 1
+        pen_count = end_idx - seg_start + 1
+        if pen_count >= 3 and pen_count % 2 == 1:
+            return end_idx
+        # 笔数校验失败，继续扫描下一个回落对
 
     return None
 
