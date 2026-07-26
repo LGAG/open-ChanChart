@@ -48,3 +48,13 @@ period_map:
   # 月K
   month: m
   m: m
+
+# 缠论算法配置
+chan:
+  # 中枢识别算法选择：
+  # - seg_pen : 段内笔中枢（默认，3笔区间 + 不跨段，见 zhongshu.md §3）
+  # - v2      : 第二种中枢算法（待设计，选择后将抛 NotImplementedError）
+  zhongshu_algo: seg_pen
+  # T1背驰阈值：趋势末端最后离开笔力度 / 前同向离开笔力度 < 此值才判背驰（见 buy_sell_points.md §3.1）。
+  # <1 即力度衰减；0.8 = 衰减20%以上才出信号，值越小越严格、信号越少但越可靠。可对照实盘调参。
+  divergence_ratio: 0.8

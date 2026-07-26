@@ -77,6 +77,7 @@ const showPens = ref(true)
 const showFractals = ref(false)
 const showSegments = ref(true)
 const showZhongshu = ref(true)
+const showBuySellPoints = ref(true)
 
 // 图形按钮(series 显隐):点亮=显示该类别所有 series,熄灭=隐藏。
 // 与勾选框是从属关系:勾选框关闭时对应按钮禁用(无数据可显隐)。
@@ -85,7 +86,8 @@ const seriesHidden = ref({
   pen: false,
   fractal: false,
   segment: false,
-  zhongshu: false
+  zhongshu: false,
+  bspoint: false
 })
 const toggleSeries = (key) => {
   seriesHidden.value[key] = !seriesHidden.value[key]
@@ -98,6 +100,7 @@ const isSeriesToggleable = (key) => {
     case 'fractal': return showFractals.value
     case 'segment': return showSegments.value
     case 'zhongshu': return showZhongshu.value
+    case 'bspoint': return showBuySellPoints.value
     default: return false
   }
 }
@@ -108,7 +111,8 @@ const seriesToggleBtns = [
   { key: 'pen', showKey: 'pens', label: '笔' },
   { key: 'fractal', showKey: 'fractals', label: '分型' },
   { key: 'segment', showKey: 'segments', label: '段' },
-  { key: 'zhongshu', showKey: 'zhongshu', label: '中枢' }
+  { key: 'zhongshu', showKey: 'zhongshu', label: '中枢' },
+  { key: 'bspoint', showKey: 'bspoints', label: '买卖点' }
 ]
 
 // 勾选框绑定的响应式变量(showPens/showFractals/...)— v-model 不能用计算式,需显式 get/set
@@ -118,6 +122,7 @@ const showVar = (showKey) => {
     case 'fractals': return showFractals
     case 'segments': return showSegments
     case 'zhongshu': return showZhongshu
+    case 'bspoints': return showBuySellPoints
     default: return showPens
   }
 }
@@ -132,6 +137,7 @@ const solidColor = (btn) => {
     case 'fractal': return p.up
     case 'segment': return p.seg
     case 'zhongshu': return p.zsh
+    case 'bspoint': return p.accent
     default: return p.accent
   }
 }
@@ -163,6 +169,7 @@ const indicatorStyle = (btn) => {
     case 'fractal': return { background: `linear-gradient(135deg, ${p.up} 50%, ${p.down} 50%)` }
     case 'segment': return { background: p.seg, boxShadow: '0 0 6px ' + p.seg }
     case 'zhongshu': return { background: `repeating-linear-gradient(90deg, ${p.zsh} 0 4px, transparent 4px 8px)` }
+    case 'bspoint': return { background: `linear-gradient(135deg, ${p.down} 50%, ${p.up} 50%)` }
     default: return {}
   }
 }
@@ -285,6 +292,24 @@ const updateChart = (preserveZoom = true) => {
         topFractals.push([fractal.date, props.chanData.chan_klines[fractal.index].high])
       } else {
         bottomFractals.push([fractal.date, props.chanData.chan_klines[fractal.index].low])
+      }
+    })
+  }
+
+  // Prepare buy/sell point markers — 后端已给出 date + price,直接用作 [date, price] 坐标。
+  // 按买/卖分组,便于分色渲染;type(1/2/3)标注于 label。
+  const buyPoints = []
+  const sellPoints = []
+  const buyPointTypes = []
+  const sellPointTypes = []
+  if (showBuySellPoints.value && props.chanData.buy_sell_points) {
+    props.chanData.buy_sell_points.forEach(pt => {
+      if (pt.side === 'buy') {
+        buyPoints.push([pt.date, pt.price])
+        buyPointTypes.push(pt.type)
+      } else {
+        sellPoints.push([pt.date, pt.price])
+        sellPointTypes.push(pt.type)
       }
     })
   }
@@ -550,6 +575,68 @@ const updateChart = (preserveZoom = true) => {
         shadowColor: p.down,
         shadowBlur: 8
       }
+    })
+  }
+
+  // Add buy/sell point markers — 买点(绿,窄长向上箭头)在低位尖端朝上指向 K 线,
+  // 卖点(红,窄长向下箭头)在高位尖端朝下指向 K 线。窄长形少遮挡 K 线本体。
+  // symbol 用自定义 SVG path,symbolSize 给 [宽,高] 控制窄长比例。
+  // 标签:买点 B+type、卖点 S+type(如 B1/B2/B3、S1/S2/S3);T1/T2/T3 均已实现。
+  // 注:buyPoints/sellPoints 与 buyPointTypes/sellPointTypes 一一对应,formatter 按 dataIndex 取类型。
+  // 窄长箭头 path(viewBox 0~10):向上尖 M5,0 L9,10 L1,10 Z;向下尖 M1,0 L9,0 L5,10 Z
+  const arrowUp = 'path://M5,0 L9,10 L1,10 Z'
+  const arrowDown = 'path://M1,0 L9,0 L5,10 Z'
+  if (buyPoints.length > 0 && !seriesHidden.value.bspoint) {
+    option.series.push({
+      name: '买点',
+      type: 'scatter',
+      data: buyPoints,
+      symbol: arrowUp,
+      symbolSize: [7, 16],   // 窄(7)长(16),尖端朝上指向 K 线低点
+      itemStyle: {
+        color: p.down,
+        shadowColor: p.down,
+        shadowBlur: 6
+      },
+      label: {
+        show: true,
+        position: 'bottom',
+        distance: 4,
+        formatter: (params) => 'B' + buyPointTypes[params.dataIndex],
+        color: p.down,
+        fontSize: 12,
+        fontWeight: 'bold',
+        textBorderColor: '#ffffff',
+        textBorderWidth: 2
+      },
+      z: 20
+    })
+  }
+
+  if (sellPoints.length > 0 && !seriesHidden.value.bspoint) {
+    option.series.push({
+      name: '卖点',
+      type: 'scatter',
+      data: sellPoints,
+      symbol: arrowDown,
+      symbolSize: [7, 16],   // 窄(7)长(16),尖端朝下指向 K 线高点
+      itemStyle: {
+        color: p.up,
+        shadowColor: p.up,
+        shadowBlur: 6
+      },
+      label: {
+        show: true,
+        position: 'top',
+        distance: 4,
+        formatter: (params) => 'S' + sellPointTypes[params.dataIndex],
+        color: p.up,
+        fontSize: 12,
+        fontWeight: 'bold',
+        textBorderColor: '#ffffff',
+        textBorderWidth: 2
+      },
+      z: 20
     })
   }
 

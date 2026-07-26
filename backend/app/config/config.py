@@ -37,3 +37,9 @@ _baostock_cfg = _cfg.get("baostock", {}) if isinstance(_cfg, dict) else {}
 BAOSTOCK_QPS_INTERVAL: float = float(_baostock_cfg.get("qps_interval", 0.3))
 BAOSTOCK_MAX_RETRIES: int = int(_baostock_cfg.get("max_retries", 3))
 BAOSTOCK_RETRY_BASE_DELAY: float = float(_baostock_cfg.get("retry_base_delay", 1.0))
+
+# 缠论算法配置：中枢识别算法选择（见 config.yaml 的 chan 段）
+_chan_cfg = _cfg.get("chan", {}) if isinstance(_cfg, dict) else {}
+ZHONGSHU_ALGO: str = str(_chan_cfg.get("zhongshu_algo", "seg_pen"))
+# T1背驰阈值：最后离开笔力度/前同向离开笔力度 < 此值才判背驰（见 buy_sell_points.md §3.1）
+DIVERGENCE_RATIO: float = float(_chan_cfg.get("divergence_ratio", 0.8))

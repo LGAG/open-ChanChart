@@ -1,7 +1,8 @@
 """缠论核心算法实现"""
-from typing import List
+from typing import Callable, List
+from app.config.config import ZHONGSHU_ALGO, DIVERGENCE_RATIO
 from app.models.stock_model import KlineData
-from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu, DAY
+from app.models.chan_model import ClassicChanKline, Fractal, Pen, Segment, ZhongShu, BuySellPoint, DAY
 from app.core.chan_helpers import (
     is_kline_contained,
     _can_form_pen,
@@ -882,6 +883,363 @@ def identify_zhongshus(pens: List[Pen], klines: List[ClassicChanKline], level = 
     return zhongshus
 
 
+def identify_zhongshus_v2(pens: List[Pen], klines: List[ClassicChanKline], level: str = DAY) -> List[ZhongShu]:
+    """[第二种中枢算法·待设计] 占位实现。
+
+    具体逻辑由用户后续设计。设计完成后替换函数体，并在 _ZHONGSHU_ALGOS
+    注册表中确认其标识符（当前为 "v2"，可重命名为更具描述性的标识）。
+    签名与 identify_zhongshus 一致，复用 ZhongShu 模型。
+    """
+    raise NotImplementedError("第二种中枢算法待设计，请在 identify_zhongshus_v2 中实现")
+
+
+# 中枢算法注册表：算法名 -> 实现函数（签名一致，复用 ZhongShu 模型）
+# 新增算法：1) 实现 identify_zhongshus_<name>  2) 在此注册  3) 在 config.yaml 的 chan.zhongshu_algo 注释加选项
+_ZHONGSHU_ALGOS: dict[str, Callable[..., List[ZhongShu]]] = {
+    "seg_pen": identify_zhongshus,   # 段内笔中枢（默认）
+    "v2": identify_zhongshus_v2,     # 第二种中枢算法（待设计）
+}
+
+
+# ---------------------------------------------------------------------------
+# 三类买卖点（见 buy_sell_points.md）
+# ---------------------------------------------------------------------------
+# 设计取舍（用户已确认）：买卖点模块独立重推离开/回抽笔，不改动已验证的
+# _scan_pens_for_zhongshus，保证中枢/段/笔输出零回归。本期仅实现 T3（突破
+# 回抽），T1/T2 待后续阶段补全。
+
+class _ZsBreak:
+    """中枢破坏结构（重推结果，供买卖点判定只读使用）。
+
+    字段均为 pens 列表索引：
+      last_in_idx  — 中枢最后纳入笔（反向笔）索引
+      leave_idx    — 离开笔索引（中枢后第一根同向笔）；不存在为 -1
+      pullback_idx — 回抽笔索引（离开笔后的反向笔）；不存在为 -1
+      broke        — 是否确认破坏（离开笔真离开 且 回抽不回区间）
+      break_up     — 破坏方向：True=向上突破(离开笔向上)，False=向下突破；broke=False 时无意义
+    """
+
+    __slots__ = ("zs_idx", "last_in_idx", "leave_idx", "pullback_idx", "broke", "break_up")
+
+    def __init__(self, zs_idx: int, last_in_idx: int) -> None:
+        self.zs_idx = zs_idx
+        self.last_in_idx = last_in_idx
+        self.leave_idx: int = -1
+        self.pullback_idx: int = -1
+        self.broke: bool = False
+        self.break_up: bool = False
+
+
+def _find_pen_by_end_index(pens: List[Pen], end_index: int) -> int:
+    """返回 end_index == 给定值的笔索引（pens 中 end_index 唯一，见 validate_pens）。
+
+    用于把中枢的 end_index（缠论K线索引）映射回 pens 列表索引，定位中枢最后
+    纳入笔。找不到返回 -1。
+    """
+    for i, pen in enumerate(pens):
+        if pen.end_index == end_index:
+            return i
+    return -1
+
+
+def _derive_zs_breaks(
+    zhongshus: List[ZhongShu], pens: List[Pen], klines: List[ClassicChanKline]
+) -> List[_ZsBreak]:
+    """对每个中枢只读重推其破坏结构（突破笔 + 回抽笔），不改中枢。
+
+    与 _scan_pens_for_zhongshus §3.3~3.4 的破坏判定同源，但泛化到两种破坏路径：
+      - 中枢吸收延伸对直到某根笔完全脱离 [ZD,ZG]。该「脱离笔」即突破走势，
+        无论它是扫描中的同向笔离开（§3.4 路径1）还是反向伙伴离开（§3.3 路径2）。
+      - 扫描因相邻笔共享端点K线，紧邻中枢的笔常被锚定在区间内（仍相交），
+        故突破笔可能不是 last_in_idx+1，需向后扫描到第一根不相交笔。
+      - 突破方向由脱离侧决定：整笔在 ZG 上方=向上突破，在 ZD 下方=向下突破。
+      - 回抽笔 = 突破笔后的反向笔；回抽不回区间才确认破坏（§3.4）。
+    笔高低点用全程极值 _pen_range_high/_pen_range_low，与中枢扫描一致。
+
+    返回每个中枢的 _ZsBreak（仅 broke=True 者对 T3 有意义）。
+    """
+    breaks: List[_ZsBreak] = []
+    n = len(pens)
+    for zs_idx, zs in enumerate(zhongshus):
+        last_in_idx = _find_pen_by_end_index(pens, zs.end_index)
+        if last_in_idx < 0:
+            continue
+        br = _ZsBreak(zs_idx, last_in_idx)
+        zg, zd = zs.high, zs.low
+
+        # 向后扫描第一根完全脱离 [ZD,ZG] 的笔 = 突破笔
+        leave_idx = -1
+        leave_up = False
+        for j in range(last_in_idx + 1, n):
+            pj = pens[j]
+            pj_high = _pen_range_high(pj, klines)
+            pj_low = _pen_range_low(pj, klines)
+            if pj_low > zg:            # 整笔在 ZG 上方 → 向上突破
+                leave_idx, leave_up = j, True
+                break
+            if pj_high < zd:           # 整笔在 ZD 下方 → 向下突破
+                leave_idx, leave_up = j, False
+                break
+            # 仍相交 → 继续向后找（中枢本会延伸吸收）
+        if leave_idx < 0:
+            # 至数据尾仍无笔脱离 → 未破坏
+            breaks.append(br)
+            continue
+        br.leave_idx = leave_idx
+        br.break_up = leave_up
+
+        # 回抽笔 = 突破笔后的反向笔
+        pullback_idx = leave_idx + 1
+        if pullback_idx >= n:
+            # 数据尾，突破笔无法被回抽确认 → 不破坏（与扫描保守结束一致）
+            breaks.append(br)
+            continue
+        pullback_pen = pens[pullback_idx]
+        br.pullback_idx = pullback_idx
+        # 回抽是否回区间（与 _scan_pens_for_zhongshus §3.4 同款判定）
+        if leave_up:
+            reentered = _pen_range_low(pullback_pen, klines) <= zg
+        else:
+            reentered = _pen_range_high(pullback_pen, klines) >= zd
+        br.broke = not reentered
+        breaks.append(br)
+
+    return breaks
+
+
+def _pen_extreme(pen: Pen, klines: List[ClassicChanKline], direction: str) -> tuple[float, int, str]:
+    """取笔在给定方向上的极值价位及其缠论K线索引、日期。
+
+    用于买卖点触发价位定位：
+      direction="up"   → 笔的最高点（顶分型端）(price, chan_kline_index, date)
+      direction="down" → 笔的最低点（底分型端）
+
+    极值端与笔方向的关系（分型在笔的两端）：
+      向上笔：低点在 start（底分型），高点在 end（顶分型）
+      向下笔：高点在 start（顶分型），低点在 end（底分型）
+    故 idx 与 date 同取该极值端，二者必须一致。
+    """
+    if direction == "up":
+        # 高点：向上笔在 end，向下笔在 start
+        if pen.direction == "up":
+            idx, date = pen.end_index, pen.end_date
+        else:
+            idx, date = pen.start_index, pen.start_date
+        price = klines[idx].high
+    else:
+        # 低点：向上笔在 start，向下笔在 end
+        if pen.direction == "up":
+            idx, date = pen.start_index, pen.start_date
+        else:
+            idx, date = pen.end_index, pen.end_date
+        price = klines[idx].low
+    return price, idx, date
+
+
+def identify_buy_sell_points(
+    pens: List[Pen], segments: List[Segment],
+    zhongshus: List[ZhongShu], klines: List[ClassicChanKline],
+) -> List[BuySellPoint]:
+    """识别三类买卖点（见 buy_sell_points.md）。
+
+    T3（突破回抽）：中枢被确认破坏（离开笔真离开 + 回抽不回区间）后，回抽笔即
+      T3 触发笔。向上突破 → T3 buy @ 回抽笔低点；向下突破 → T3 sell @ 回抽笔高点。
+    T1（背驰反转）【工程取舍·笔幅度代理】：趋势末端，最后离开笔创趋势新极值但笔
+      幅度衰减 → 反转。上涨趋势末端 → T1 sell @ 离开笔高点；下跌末端 → T1 buy @
+      离开笔低点。趋势 = ≥2 个同向、依次抬高/降低的中枢（用其突破方向+区间相对位置
+      判定，不引走势递归）。
+    T2（确认不破）：T1 之后首次反向回抽笔不回前中枢区间 → 反转确认。方向同 T1。
+
+    离开/回抽笔由 _derive_zs_breaks 重推，中枢代码零改动。
+    """
+    if not zhongshus or len(pens) < 2:
+        return []
+
+    points: List[BuySellPoint] = []
+    breaks = _derive_zs_breaks(zhongshus, pens, klines)
+
+    for br in breaks:
+        if not br.broke or br.pullback_idx < 0:
+            continue
+        pullback_pen = pens[br.pullback_idx]
+        # 触发价位：回抽笔的回撤极值（向上突破取回抽低点，向下突破取回抽高点）
+        if br.break_up:
+            price, ck_idx, date = _pen_extreme(pullback_pen, klines, "down")
+            side = "buy"
+        else:
+            price, ck_idx, date = _pen_extreme(pullback_pen, klines, "up")
+            side = "sell"
+
+        points.append(BuySellPoint(
+            type=3,
+            side=side,
+            pen_index=br.pullback_idx,
+            chan_kline_index=ck_idx,
+            date=date,
+            price=price,
+            zhongshu_index=br.zs_idx,
+            is_sure=pullback_pen.is_sure,
+        ))
+
+    # ---- T1（背驰反转）+ T2（确认不破）----
+    points.extend(_identify_t1_t2(zhongshus, pens, klines, breaks))
+
+    return points
+
+
+def _identify_t1_t2(
+    zhongshus: List[ZhongShu], pens: List[Pen],
+    klines: List[ClassicChanKline], breaks: List[_ZsBreak],
+) -> List[BuySellPoint]:
+    """识别 T1（背驰反转）/ T2（确认不破），见 buy_sell_points.md §3.1~3.2。
+
+    趋势定义【工程取舍】：≥2 个同向、依次抬高/降低的中枢。中枢本身不带方向，用其
+    破坏方向（_ZsBreak.break_up）归类——向上突破的中枢属上涨趋势，向下突破属下跌趋势。
+    趋势 = 同向中枢序列中 ZG/ZD 单调同向抬升/降低的连续段（至少 2 个）。
+
+    背驰代理【工程取舍】：趋势中每个中枢的「突破笔」（_ZsBreak.leave_idx）即为该中枢
+    的离开笔。趋势末端 = 序列最后一中枢的突破笔；前一同向离开笔 = 前一中枢的突破笔。
+    末端突破笔创趋势新极值（high > 前突破笔 high / low < 前突破笔 low）且笔幅度
+    < 前突破笔幅度 × divergence_ratio → 衰减 → 背驰。
+
+    T2：T1 触发笔（末端突破笔）后第一根反向回抽笔（leave_idx+1）不回最后中枢区间
+    → 反转确认。与 T3「不回区间」同标准，但 T2 仅在 T1 成立时出、方向随 T1（反转）。
+    """
+    # 仅纳入已突破（有 leave_idx）的中枢，按 pens 顺序天然升序
+    broke_zs = [
+        (i, br) for i, br in enumerate(breaks)
+        if br.leave_idx >= 0
+    ]
+    if len(broke_zs) < 2:
+        return []
+
+    points: List[BuySellPoint] = []
+
+    # 把突破笔的幅度/极值预算一次（同 pen 可能被多趋势复用，但开销小，直接算）
+    def pen_amplitude(pen_idx: int) -> float:
+        p = pens[pen_idx]
+        return _pen_range_high(p, klines) - _pen_range_low(p, klines)
+
+    # 扫描同向（break_up 一致）且单调抬升/降低的中枢序列，找趋势
+    # 双指针：seq 记录当前连续趋势的中枢 (zs_idx, br) 列表
+    seq: List[tuple[int, _ZsBreak]] = []
+    seq_up: bool = broke_zs[0][1].break_up
+
+    def _flush(seq: List[tuple[int, _ZsBreak]], seq_up: bool) -> None:
+        """对一段已成型的趋势做 T1/T2 判定并追加买卖点。"""
+        if len(seq) < 2:
+            return
+        # 末端突破笔（最后一中枢的 leave_idx）、前一同向离开笔（前一中枢 leave_idx）
+        last_zs_idx, last_br = seq[-1]
+        prev_zs_idx, prev_br = seq[-2]
+        last_leave_idx = last_br.leave_idx
+        prev_leave_idx = prev_br.leave_idx
+        if last_leave_idx < 0 or prev_leave_idx < 0:
+            return
+        last_leave = pens[last_leave_idx]
+        prev_leave = pens[prev_leave_idx]
+
+        last_amp = pen_amplitude(last_leave_idx)
+        prev_amp = pen_amplitude(prev_leave_idx)
+        if prev_amp <= 0:
+            return
+
+        # 创新极值 + 幅度衰减 → 背驰
+        if seq_up:
+            # 上涨趋势：末端离开笔 high 创新高（> 前离开笔 high），幅度衰减 → 顶背驰
+            last_extreme = _pen_range_high(last_leave, klines)
+            prev_extreme = _pen_range_high(prev_leave, klines)
+            if last_extreme <= prev_extreme:
+                return
+            side = "sell"
+            price, ck_idx, date = _pen_extreme(last_leave, klines, "up")
+        else:
+            last_extreme = _pen_range_low(last_leave, klines)
+            prev_extreme = _pen_range_low(prev_leave, klines)
+            if last_extreme >= prev_extreme:
+                return
+            side = "buy"
+            price, ck_idx, date = _pen_extreme(last_leave, klines, "down")
+
+        ratio = last_amp / prev_amp
+        if ratio >= DIVERGENCE_RATIO:
+            return  # 未达衰减阈值，不判背驰
+
+        points.append(BuySellPoint(
+            type=1,
+            side=side,
+            pen_index=last_leave_idx,
+            chan_kline_index=ck_idx,
+            date=date,
+            price=price,
+            zhongshu_index=last_zs_idx,
+            is_sure=last_leave.is_sure,
+            prev_pen_index=prev_leave_idx,
+            strength_ratio=round(ratio, 4),
+        ))
+
+        # ---- T2：T1 触发笔后首次反向回抽笔不回最后中枢区间 ----
+        # 回抽笔 = 末端突破笔(leave_idx)后的反向笔，与 T3 同款「不回区间」判定：
+        #   向上突破(break_up)：回抽向下笔回到 ZG 及以下才算回区间（low <= ZG）
+        #   向下突破：回抽向上笔回到 ZD 及以上才算回区间（high >= ZD）
+        # 与 T3 的判定完全同源（见 _derive_zs_breaks 末段）。
+        last_zs = zhongshus[last_zs_idx]
+        last_br = seq[-1][1]
+        pullback_idx = last_leave_idx + 1
+        if pullback_idx >= len(pens):
+            return
+        pullback_pen = pens[pullback_idx]
+        if last_br.break_up:
+            reentered = _pen_range_low(pullback_pen, klines) <= last_zs.high
+            if reentered:
+                return
+            # 顶背驰 sell：T2 sell @ 回抽向下笔高点
+            pb_price, pb_ck, pb_date = _pen_extreme(pullback_pen, klines, "up")
+            pb_side = "sell"
+        else:
+            reentered = _pen_range_high(pullback_pen, klines) >= last_zs.low
+            if reentered:
+                return
+            # 底背驰 buy：T2 buy @ 回抽向上笔低点
+            pb_price, pb_ck, pb_date = _pen_extreme(pullback_pen, klines, "down")
+            pb_side = "buy"
+        points.append(BuySellPoint(
+            type=2,
+            side=pb_side,
+            pen_index=pullback_idx,
+            chan_kline_index=pb_ck,
+            date=pb_date,
+            price=pb_price,
+            zhongshu_index=last_zs_idx,
+            is_sure=pullback_pen.is_sure,
+        ))
+
+    for zs_idx, br in broke_zs:
+        if br.break_up != seq_up:
+            # 方向切换 → 先结算当前趋势，再起新序列
+            _flush(seq, seq_up)
+            seq = [(zs_idx, br)]
+            seq_up = br.break_up
+            continue
+        # 同向：检查是否单调抬升/降低（与序列前一中枢比）
+        if seq:
+            prev_zs = zhongshus[seq[-1][0]]
+            cur_zs = zhongshus[zs_idx]
+            if seq_up:
+                monotonic = cur_zs.high > prev_zs.high and cur_zs.low > prev_zs.low
+            else:
+                monotonic = cur_zs.high < prev_zs.high and cur_zs.low < prev_zs.low
+            if not monotonic:
+                # 不单调 → 当前趋势结束，起新序列（以本中枢为起点）
+                _flush(seq, seq_up)
+                seq = [(zs_idx, br)]
+                continue
+        seq.append((zs_idx, br))
+    _flush(seq, seq_up)
+
+    return points
+
+
 def calculate_chan_data(klines: List[KlineData], level = DAY) -> dict:
     """
     计算缠论数据
@@ -897,7 +1255,8 @@ def calculate_chan_data(klines: List[KlineData], level = DAY) -> dict:
             "fractals": [],
             "pens": [],
             "segments": [],
-            "zhongshus": []
+            "zhongshus": [],
+            "buy_sell_points": []
         }
 
     # 1. 处理包含关系（始终输出 List[ClassicChanKline]）
@@ -920,13 +1279,22 @@ def calculate_chan_data(klines: List[KlineData], level = DAY) -> dict:
     # 4. 生成段
     segments = generate_segments(pens, processed_klines)
 
-    # 5. 识别中枢
-    zhongshus = identify_zhongshus(pens, processed_klines, level)
+    # 5. 识别中枢（按 config.yaml 的 chan.zhongshu_algo 选择算法）
+    zhongshu_fn = _ZHONGSHU_ALGOS.get(ZHONGSHU_ALGO)
+    if zhongshu_fn is None:
+        raise ValueError(
+            f"未知的 zhongshu_algo: {ZHONGSHU_ALGO!r}，可选: {list(_ZHONGSHU_ALGOS)}"
+        )
+    zhongshus = zhongshu_fn(pens, processed_klines, level)
+
+    # 6. 识别买卖点(T1背驰反转/T2确认不破/T3突破回抽,依赖笔+中枢,段预留供后续)
+    buy_sell_points = identify_buy_sell_points(pens, segments, zhongshus, processed_klines)
 
     return {
         "chan_klines": processed_klines,
         "fractals": fractals,
         "pens": pens,
         "segments": segments,
-        "zhongshus": zhongshus
+        "zhongshus": zhongshus,
+        "buy_sell_points": buy_sell_points
     }

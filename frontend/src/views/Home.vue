@@ -46,6 +46,9 @@
           <el-button type="warning" @click="handleUpdateKline" :loading="updatingKline" :disabled="!currentStock">
             更新K线数据
           </el-button>
+          <el-button type="danger" @click="handleAddFavorite" :disabled="!currentStock">
+            收藏当前股票
+          </el-button>
         </div>
       </div>
 
@@ -67,19 +70,27 @@
     <el-card class="stats-panel" v-if="chanData.pens">
       <h3>缠论数据统计</h3>
       <el-row :gutter="20">
-        <el-col :span="6">
+        <el-col :span="4">
           <el-statistic title="分型数量" :value="chanData.fractals?.length || 0" />
         </el-col>
-        <el-col :span="6">
+        <el-col :span="4">
           <el-statistic title="笔数量" :value="chanData.pens?.length || 0" />
         </el-col>
-        <el-col :span="6">
+        <el-col :span="4">
           <el-statistic title="段数量" :value="chanData.segments?.length || 0" />
         </el-col>
-        <el-col :span="6">
+        <el-col :span="4">
           <el-statistic title="中枢数量" :value="chanData.zhongshus?.length || 0" />
         </el-col>
+        <el-col :span="4">
+          <el-statistic title="买卖点数量" :value="chanData.buy_sell_points?.length || 0" />
+        </el-col>
       </el-row>
+    </el-card>
+
+    <el-card class="favorite-panel">
+      <h3>我的收藏</h3>
+      <FavoriteStocks ref="favoriteRef" @select="handleStockChange" />
     </el-card>
   </div>
 </template>
@@ -89,8 +100,10 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import KlineChart from '../components/KlineChart.vue'
 import StockSelector from '../components/StockSelector.vue'
+import FavoriteStocks from '../components/FavoriteStocks.vue'
 import { getChanAnalysis, getPeriods } from '../api/chan'
 import { refreshStockList, updateKlineData } from '../api/stock'
+import { addFavorite } from '../api/favorite'
 
 interface Stock {
   code: string
@@ -121,15 +134,17 @@ const periodOptions = ref<PeriodOption[]>(DEFAULT_PERIOD_OPTIONS)
 const loading = ref(false)
 const refreshingList = ref(false)
 const updatingKline = ref(false)
+const favoriteRef = ref()
 const klineData = ref<any[]>([])
 const chanData = ref<{
   fractals?: any[]
   pens?: any[]
   segments?: any[]
   zhongshus?: any[]
+  buy_sell_points?: any[]
 }>({})
 const dateRange = ref<[string, string]>([
-  new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().slice(0, 10),
+  '2026-01-01',
   new Date().toISOString().slice(0, 10)
 ])
 
@@ -148,6 +163,25 @@ onMounted(async () => {
 const handleStockChange = (stock: Stock) => {
   currentStock.value = stock
   loadData()
+}
+
+// 收藏当前选中股票，成功后刷新底部收藏列表
+const handleAddFavorite = async () => {
+  if (!currentStock.value) {
+    ElMessage.warning('请先选择股票')
+    return
+  }
+  try {
+    const response = await addFavorite(currentStock.value)
+    if (response?.code === 200) {
+      ElMessage.success('收藏成功')
+      favoriteRef.value?.refresh()
+    } else {
+      ElMessage.error(response?.message || '收藏失败')
+    }
+  } catch (error: any) {
+    ElMessage.error(`收藏失败：${error?.message || '未知错误'}`)
+  }
 }
 
 const handleRefreshStockList = async () => {
@@ -281,6 +315,11 @@ const loadData = async () => {
 
 .stats-panel h3 {
   margin: 0 0 20px 0;
+  color: var(--text);
+}
+
+.favorite-panel h3 {
+  margin: 0 0 16px 0;
   color: var(--text);
 }
 </style>

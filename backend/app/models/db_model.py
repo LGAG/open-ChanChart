@@ -172,6 +172,26 @@ class FiveMinKline(Base):
     volume: Mapped[Decimal | None] = mapped_column(Numeric(16, 2), nullable=True, comment="成交量")
 
 
+# ── 收藏股票表 ──
+
+class Favorite(Base):
+    """用户收藏的股票。
+
+    主键 (code, market) 天然防重，与 Stock 表主键一致。name 反范式存储：
+    收藏即使后续被从 stock 表删除也保留展示名；重新搜索选中收藏时会 upsert 刷新 name。
+    created_at 用于按收藏顺序排序。
+    """
+    __tablename__ = "favorite"
+    __table_args__ = {"comment": "收藏股票表"}
+
+    code: Mapped[str] = mapped_column(String(20), primary_key=True, nullable=False, comment="股票代码")
+    market: Mapped[str] = mapped_column(String(20), primary_key=True, nullable=False, comment="交易所")
+    name: Mapped[str] = mapped_column(String(50), nullable=False, comment="股票名称")
+    created_at: Mapped[dt_datetime] = mapped_column(
+        DateTime, default=dt_datetime.now, nullable=False, comment="收藏时间"
+    )
+
+
 # ── 周期 → ORM 模型映射 ──
 
 KLINE_MODEL_MAP: dict[str, type[Base]] = {

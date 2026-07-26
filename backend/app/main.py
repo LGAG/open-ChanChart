@@ -1,7 +1,7 @@
 """FastAPI主应用程序"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stock, chan
+from app.api import stock, chan, favorite
 import os
 from dotenv import load_dotenv
 from app.utils.middleware import RedisClient
@@ -29,6 +29,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(stock.router)
 app.include_router(chan.router)
+app.include_router(favorite.router)
 
 
 @app.get("/")

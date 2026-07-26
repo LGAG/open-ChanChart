@@ -48,9 +48,25 @@ class ZhongShu(BaseModel):
     level: int = Field(..., description="中枢级别")
 
 
+class BuySellPoint(BaseModel):
+    """买卖点数据模型"""
+    type: int = Field(..., description="买卖点类型 1/2/3")
+    side: str = Field(..., description="方向 buy/sell")
+    pen_index: int = Field(..., description="触发笔在pens列表的索引")
+    chan_kline_index: int = Field(..., description="触发笔极值端的缠论K线索引")
+    date: str = Field(..., description="触发日期")
+    price: float = Field(..., description="触发价位(笔极值)")
+    zhongshu_index: int = Field(..., description="关联中枢在zhongshus列表的索引,无关联填-1")
+    is_sure: bool = Field(default=True, description="是否确认(True=确定/False=基于虚拟笔)")
+    # T1专用(其它类型留默认)
+    prev_pen_index: int = Field(default=-1, description="T1:前一同向离开笔索引(对比力度用)")
+    strength_ratio: float = Field(default=0.0, description="T1:本笔力度/前笔力度(<1=衰减=背驰)")
+
+
 class ChanData(BaseModel):
     """缠论数据响应模型"""
     fractals: List[Fractal] = Field(default_factory=list, description="分型列表")
     pens: List[Pen] = Field(default_factory=list, description="笔列表")
     segments: List[Segment] = Field(default_factory=list, description="段列表")
     zhongshus: List[ZhongShu] = Field(default_factory=list, description="中枢列表")
+    buy_sell_points: List[BuySellPoint] = Field(default_factory=list, description="买卖点列表")
